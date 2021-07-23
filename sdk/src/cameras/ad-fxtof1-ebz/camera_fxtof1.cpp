@@ -69,7 +69,8 @@ CameraFxTof1::CameraFxTof1(
     : m_depthSensor(depthSensor), m_devStarted(false),
       m_eepromInitialized(false), m_tempSensorsInitialized(false),
       m_availableControls(availableControls), m_depthCorrection(true),
-      m_cameraGeometryCorrection(true), m_revision("RevA"), m_devProgrammed(false) {
+      m_cameraGeometryCorrection(true), m_revision("RevA"),
+      m_devProgrammed(false) {
 
     // Check Depth Sensor
     if (!depthSensor) {
@@ -188,12 +189,14 @@ aditof::Status CameraFxTof1::initialize() {
 }
 
 aditof::Status CameraFxTof1::start() {
-     return m_depthSensor->start(); // For now we keep the device open all the time
+    return m_depthSensor
+        ->start(); // For now we keep the device open all the time
     //return aditof::Status::OK;
 }
 
 aditof::Status CameraFxTof1::stop() {
-     return m_depthSensor->stop(); // For now we keep the device open all the time
+    return m_depthSensor
+        ->stop(); // For now we keep the device open all the time
     //return aditof::Status::OK;
 }
 
