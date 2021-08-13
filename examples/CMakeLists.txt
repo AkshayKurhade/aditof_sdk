@@ -3,6 +3,7 @@ project(examples)
 
 add_subdirectory(aditof-demo)
 add_subdirectory(first-frame)
+add_subdirectory(test-camera)
 
 if (WITH_NETWORK)
     add_subdirectory(first-frame-network)
@@ -21,6 +22,7 @@ include(GNUInstallDirs)
 install(PROGRAMS
     $<TARGET_FILE:aditof-demo>
     $<TARGET_FILE:first-frame>
+    $<TARGET_FILE:test-camera>
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -30,8 +32,12 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:aditof> $<TARGET_FILE_DIR:aditof-demo>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:aditof> $<TARGET_FILE_DIR:first-frame>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:aditof> $<TARGET_FILE_DIR:first-frame-network>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:aditof> $<TARGET_FILE_DIR:test-camera>
+                
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:OpenSSL::SSL> $<TARGET_FILE_DIR:aditof-demo>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:OpenSSL::SSL> $<TARGET_FILE_DIR:first-frame>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:OpenSSL::SSL> $<TARGET_FILE_DIR:first-frame-network>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:OpenSSL::SSL> $<TARGET_FILE_DIR:test-camera>
+        
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
