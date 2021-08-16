@@ -125,7 +125,19 @@ int main(int argc, char *argv[]) {
     frame.getDetails(fDetails);
     if(fDetails.width *fDetails.height > 0)
     {
-        TEST_LOG(INFO, "Test passed OK");
+        for (int i=0; i<fDetails.width *fDetails.height;i++)
+        {
+            if (data1[i] != 0)
+            {
+                TEST_LOG(INFO, "Test passed OK!");
+                return 0;
+            }
+        }
+        TEST_LOG(INFO, "Test passed with only zero values!");
+    }
+    else
+    {
+        TEST_LOG(INFO, "Test failed!");
     }
     fclose(fp);
     return 0;
