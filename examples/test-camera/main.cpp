@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
     frame.getDetails(fDetails);
     if(fDetails.width *fDetails.height > 0)
     {
-        TEST_LOG(INFO, "Succesfully printed the frame");
+        TEST_LOG(INFO, "Test passed OK");
     }
     fclose(fp);
     return 0;
