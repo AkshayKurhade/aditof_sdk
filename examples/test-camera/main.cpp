@@ -36,7 +36,7 @@
 #include <iostream>
 #include <stdio.h>
 #define TEST_LOG(X, Y) {fprintf (fp, #X ": Time:%s, File:%s(%d) " #Y  "\n", __TIMESTAMP__, __FILE__, __LINE__); \
-                        std::cout<<#Y<<std::endl; = }
+                        std::cout<<#Y<<std::endl;}
 
 using namespace aditof;
 
