@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
 
     std::cout<<"Tof camera test \n";
     FILE *fp= fopen("logfile.txt", "w");
-    //google::InitGoogleLogging(argv[0]);
+    google::InitGoogleLogging(argv[0]);
     FLAGS_alsologtostderr = 1;
 
     Status status = Status::OK;
@@ -131,25 +131,15 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    FrameDetails fDetails;
+     FrameDetails fDetails;
     frame.getDetails(fDetails);
-    if(fDetails.width * fDetails.height > 0)
-    {
-        for (unsigned int i=0; i < fDetails.width * fDetails.height; ++i)
-        {
-            if (data1[i] != 0)
-            {
-                TEST_LOG(INFO, "Test passed OK!");
-                fclose(fp);
-                return 0;
-            }
-        }
-        TEST_LOG(INFO, "Test passed with only zero values!");
+    for (unsigned int i = 0; i < fDetails.width * fDetails.height; ++i) {
+        TEST_LOG(INFO, "Test passed ok");
+        break;
+        fclose(fp);
+        return 0;
     }
-    else
-    {
-        TEST_LOG(INFO, "Test failed!");
-    }
+    TEST_LOG(INFO, "Test failed");    
     fclose(fp);
     return 0;
 }
