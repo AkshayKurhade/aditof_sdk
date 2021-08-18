@@ -42,7 +42,6 @@ using namespace aditof;
 
 int main(int argc, char *argv[]) {
 
-    std::cout<<"Tof camera test \n";
     FILE *fp= fopen("logfile.txt", "w");
     google::InitGoogleLogging(argv[0]);
     FLAGS_alsologtostderr = 1;
@@ -56,7 +55,6 @@ int main(int argc, char *argv[]) {
     if (cameras.empty()) {
         //LOG(WARNING) << "No cameras found";
         TEST_LOG(INFO, "No cameras found");
-        fclose(fp);
         return 0;
     }
 
@@ -65,7 +63,6 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not initialize camera!";
         TEST_LOG(INFO, "Could not initialize camera!");
-        fclose(fp);
         return 0;
     }
 
@@ -74,14 +71,12 @@ int main(int argc, char *argv[]) {
     if (frameTypes.empty()) {
         //std::cout << "no frame type avaialble!";
         TEST_LOG(INFO, "no frame type avaialble!");
-        fclose(fp);
         return 0;
     }
     status = camera->setFrameType(frameTypes.front());
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not set camera frame type!";
         TEST_LOG(INFO, "Could not set camera frame type!");
-        fclose(fp);
         return 0;
     }
 
@@ -90,14 +85,12 @@ int main(int argc, char *argv[]) {
     if (modes.empty()) {
         //LOG(ERROR) << "no camera modes available!";
         TEST_LOG(INFO, "no camera modes available!");
-        fclose(fp);
         return 0;
     }
     status = camera->setMode(modes.front());
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not set camera mode!";
         TEST_LOG(INFO, "Could not set camera mode!");
-        fclose(fp);
         return 0;
     }
 
@@ -107,7 +100,6 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not request frame!";
         TEST_LOG(INFO, "Could not request frame!");
-        fclose(fp);
         return 0;
     } else {
         //LOG(INFO) << "succesfully requested frame!";
@@ -120,27 +112,28 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not get frame data!";
         TEST_LOG(INFO, "Could not get frame data!");
-        fclose(fp);
         return 0;
     }
 
     if (!data1) {
         //LOG(ERROR) << "no memory allocated in frame";
         TEST_LOG(INFO, "no memory allocated in frame");
+        return 0;
+    }
+
+    if (status == Status::OK)
+    {
+        TEST_LOG(INFO, "Test passed succesfully!");
         fclose(fp);
         return 0;
     }
 
-     FrameDetails fDetails;
+    FrameDetails fDetails;
     frame.getDetails(fDetails);
     for (unsigned int i = 0; i < fDetails.width * fDetails.height; ++i) {
-        TEST_LOG(INFO, "Test passed ok");
-        break;
-        fclose(fp);
-        return 0;
+        std::cout << data1[i] << " ";
     }
-    TEST_LOG(INFO, "Test failed");    
-    fclose(fp);
+
     return 0;
 }
 
