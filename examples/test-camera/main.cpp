@@ -55,6 +55,7 @@ int main(int argc, char *argv[]) {
     if (cameras.empty()) {
         //LOG(WARNING) << "No cameras found";
         TEST_LOG(INFO, "No cameras found");
+        fclose(fp);
         return 0;
     }
 
@@ -63,6 +64,7 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not initialize camera!";
         TEST_LOG(INFO, "Could not initialize camera!");
+        fclose(fp);
         return 0;
     }
 
@@ -71,12 +73,14 @@ int main(int argc, char *argv[]) {
     if (frameTypes.empty()) {
         //std::cout << "no frame type avaialble!";
         TEST_LOG(INFO, "no frame type avaialble!");
+        fclose(fp);
         return 0;
     }
     status = camera->setFrameType(frameTypes.front());
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not set camera frame type!";
         TEST_LOG(INFO, "Could not set camera frame type!");
+        fclose(fp);
         return 0;
     }
 
@@ -85,12 +89,14 @@ int main(int argc, char *argv[]) {
     if (modes.empty()) {
         //LOG(ERROR) << "no camera modes available!";
         TEST_LOG(INFO, "no camera modes available!");
+        fclose(fp);
         return 0;
     }
     status = camera->setMode(modes.front());
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not set camera mode!";
         TEST_LOG(INFO, "Could not set camera mode!");
+        fclose(fp);
         return 0;
     }
 
@@ -100,6 +106,7 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not request frame!";
         TEST_LOG(INFO, "Could not request frame!");
+        fclose(fp);
         return 0;
     } else {
         //LOG(INFO) << "succesfully requested frame!";
@@ -112,24 +119,27 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         //LOG(ERROR) << "Could not get frame data!";
         TEST_LOG(INFO, "Could not get frame data!");
+        fclose(fp);
         return 0;
     }
 
     if (!data1) {
         //LOG(ERROR) << "no memory allocated in frame";
         TEST_LOG(INFO, "no memory allocated in frame");
+        fclose(fp);
         return 0;
     }
 
     FrameDetails fDetails;
     frame.getDetails(fDetails);
-    if(fDetails.width *fDetails.height > 0)
+    if(fDetails.width * fDetails.height > 0)
     {
-        for (int i=0; i<fDetails.width *fDetails.height;i++)
+        for (unsigned int i=0; i < fDetails.width * fDetails.height; ++i)
         {
             if (data1[i] != 0)
             {
                 TEST_LOG(INFO, "Test passed OK!");
+                fclose(fp);
                 return 0;
             }
         }
