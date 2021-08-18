@@ -34,15 +34,11 @@
 #include <aditof/system.h>
 #include <glog/logging.h>
 #include <iostream>
-#include <stdio.h>
-#define TEST_LOG(X, Y) {fprintf (fp, #X ": Time:%s, File:%s(%d) " #Y  "\n", __TIMESTAMP__, __FILE__, __LINE__); \
-                        std::cout<<#Y<<std::endl;}
 
 using namespace aditof;
 
 int main(int argc, char *argv[]) {
 
-    FILE *fp= fopen("logfile.txt", "w");
     google::InitGoogleLogging(argv[0]);
     FLAGS_alsologtostderr = 1;
 
@@ -53,44 +49,38 @@ int main(int argc, char *argv[]) {
     std::vector<std::shared_ptr<Camera>> cameras;
     system.getCameraList(cameras);
     if (cameras.empty()) {
-        //LOG(WARNING) << "No cameras found";
-        TEST_LOG(INFO, "No cameras found");
+        LOG(WARNING) << "No cameras found";
         return 0;
     }
 
     auto camera = cameras.front();
     status = camera->initialize();
     if (status != Status::OK) {
-        //LOG(ERROR) << "Could not initialize camera!";
-        TEST_LOG(INFO, "Could not initialize camera!");
+        LOG(ERROR) << "Could not initialize camera!";
         return 0;
     }
 
     std::vector<std::string> frameTypes;
     camera->getAvailableFrameTypes(frameTypes);
     if (frameTypes.empty()) {
-        //std::cout << "no frame type avaialble!";
-        TEST_LOG(INFO, "no frame type avaialble!");
+        std::cout << "no frame type avaialble!";
         return 0;
     }
     status = camera->setFrameType(frameTypes.front());
     if (status != Status::OK) {
-        //LOG(ERROR) << "Could not set camera frame type!";
-        TEST_LOG(INFO, "Could not set camera frame type!");
+        LOG(ERROR) << "Could not set camera frame type!";
         return 0;
     }
 
     std::vector<std::string> modes;
     camera->getAvailableModes(modes);
     if (modes.empty()) {
-        //LOG(ERROR) << "no camera modes available!";
-        TEST_LOG(INFO, "no camera modes available!");
+        LOG(ERROR) << "no camera modes available!";
         return 0;
     }
     status = camera->setMode(modes.front());
     if (status != Status::OK) {
-        //LOG(ERROR) << "Could not set camera mode!";
-        TEST_LOG(INFO, "Could not set camera mode!");
+        LOG(ERROR) << "Could not set camera mode!";
         return 0;
     }
 
@@ -98,33 +88,22 @@ int main(int argc, char *argv[]) {
 
     status = camera->requestFrame(&frame);
     if (status != Status::OK) {
-        //LOG(ERROR) << "Could not request frame!";
-        TEST_LOG(INFO, "Could not request frame!");
+        LOG(ERROR) << "Could not request frame!";
         return 0;
     } else {
-        //LOG(INFO) << "succesfully requested frame!";
-        TEST_LOG(INFO, "succesfully requested frame!");
+        LOG(INFO) << "succesfully requested frame!";
     }
 
     uint16_t *data1;
     status = frame.getData(FrameDataType::FULL_DATA, &data1);
 
     if (status != Status::OK) {
-        //LOG(ERROR) << "Could not get frame data!";
-        TEST_LOG(INFO, "Could not get frame data!");
+        LOG(ERROR) << "Could not get frame data!";
         return 0;
     }
 
     if (!data1) {
-        //LOG(ERROR) << "no memory allocated in frame";
-        TEST_LOG(INFO, "no memory allocated in frame");
-        return 0;
-    }
-
-    if (status == Status::OK)
-    {
-        TEST_LOG(INFO, "Test passed succesfully!");
-        fclose(fp);
+        LOG(ERROR) << "no memory allocated in frame";
         return 0;
     }
 
@@ -136,4 +115,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-
