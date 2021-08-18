@@ -42,8 +42,9 @@ using namespace aditof;
 
 int main(int argc, char *argv[]) {
 
+    std::cout<<"Tof camera test \n";
     FILE *fp= fopen("logfile.txt", "w");
-    google::InitGoogleLogging(argv[0]);
+    //google::InitGoogleLogging(argv[0]);
     FLAGS_alsologtostderr = 1;
 
     Status status = Status::OK;
