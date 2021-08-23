@@ -457,6 +457,10 @@ aditof::Status CameraFxTof1::setControl(const std::string &control,
         m_cameraGeometryCorrection = std::stoi(value) != 0;
     }
 
+    if (control == "revision") {
+        m_revision = value;
+    }
+
     return status;
 }
 
@@ -486,6 +490,10 @@ aditof::Status CameraFxTof1::getControl(const std::string &control,
 
     if (control == "camera_geometry_correction") {
         value = m_cameraGeometryCorrection ? "1" : "0";
+    }
+
+    if (control == "revision") {
+        value = m_revision;
     }
 
     return status;
