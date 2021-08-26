@@ -64,7 +64,6 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
         size++;
     }
     pclose(fp);
-    buf[size] = '\0';
     std::string str(buf);
     /*Check if the obtained file has content dev and vide in it*/
     if (str.find("dev")==string::npos || str.find("video")==string::npos)
