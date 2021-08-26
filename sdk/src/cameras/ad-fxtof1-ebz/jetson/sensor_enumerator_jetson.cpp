@@ -44,7 +44,7 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
     using namespace aditof;
     using namespace std;
     
-    google::InitGoogleLogging(argv[0]);
+    google::InitGoogleLogging("sensor_enumerator_jetson");
     FLAGS_alsologtostderr = 1;
 
     char *buf;
@@ -83,7 +83,7 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
 
 Status TargetSensorEnumerator::searchSensors() {
     Status status = Status::OK;
-    google::InitGoogleLogging(argv[0]);
+    google::InitGoogleLogging("sensor_enumerator_jetson");
     FLAGS_alsologtostderr = 1;
     LOG(INFO) << "Looking for devices on the target: Jetson";
 
