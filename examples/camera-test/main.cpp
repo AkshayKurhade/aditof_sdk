@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
         std::cout << "no frame type avaialble!";
         return 0;
     }
-    status = camera->setFrameType(frameTypes.front());
+    status = camera->setFrameType(argv[1]);
     if (status != Status::OK) {
         LOG(ERROR) << "Could not set camera frame type!";
         return 0;
