@@ -35,6 +35,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <glog/logging.h>
 
 using namespace aditof;
 
@@ -43,6 +44,9 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
     using namespace aditof;
     using namespace std;
     
+    google::InitGoogleLogging(argv[0]);
+    FLAGS_alsologtostderr = 1;
+
     char *buf;
     int size = 0;
     size_t idx = 0;
@@ -52,7 +56,7 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
     sprintf(cmd, "v4l2-ctl --list-devices | grep addi9036 -A 2 | sed '1d' | sed 's/^[[:space:]]*//g' | sed '2d'");
     FILE *fp = popen(cmd, "r");
     if (!fp) {
-        LOG(WARNING) << "Error running media-ctl";
+        LOG(WARNING) << "Error running v4l2-ctl";
         return Status::GENERIC_ERROR;
     }   
 
@@ -79,6 +83,8 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
 
 Status TargetSensorEnumerator::searchSensors() {
     Status status = Status::OK;
+    google::InitGoogleLogging(argv[0]);
+    FLAGS_alsologtostderr = 1;
     LOG(INFO) << "Looking for devices on the target: Jetson";
 
     // TO DO: Don't guess the device, find a way to identify it so we are sure
