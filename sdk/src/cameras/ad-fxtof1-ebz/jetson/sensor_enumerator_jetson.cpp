@@ -32,7 +32,6 @@
 #include "connections/target/target_sensor_enumerator.h"
 #include "sensor_names.h"
 #include "target_definitions.h"
-local::
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
