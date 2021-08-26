@@ -111,12 +111,11 @@ int main(int argc, char *argv[]) {
     frame.getDetails(fDetails);
     for (unsigned int i = 0; i < fDetails.width * fDetails.height; ++i) {
         //std::cout << data1[i] << " ";
-        if(data1[i]>0)
-        {
-            std::cout<<"Test passed";
+        if (data1[i] > 0) {
+            std::cout << "Test passed";
             return 0;
         }
     }
-    std::cout<<"Only zero values";
+    std::cout << "Only zero values";
     return 0;
 }
