@@ -65,15 +65,16 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
         size++;
     }
     pclose(fp);
-    buf[size] = '\0';
+//    buf[size] = '\0';
     std::string str(buf);
+	str.resize(size-2);
     /*Check if the obtained file has content dev and vide in it*/
     if (str.find("dev")==string::npos || str.find("video")==string::npos)
     {
         LOG(WARNING) << "Generic error";
         return Status::GENERIC_ERROR;
     }
-    std::cout<<"The result:"<<str<<"\n";
+    std::cout<<"The result:"<<str<<"| \n";
     dev_name = str;
     subdev_name = str;
     return Status::OK;
@@ -101,6 +102,10 @@ Status TargetSensorEnumerator::searchSensors() {
     if (devPath.empty() || subdevPath.empty()) {
         return Status::GENERIC_ERROR;
     }
+	
+	std::cout<<"Compare: "<<devPath.compare("/dev/video0")<<"| end of compare";	
+
+	std::cout<<std::endl<<"/dev/video0"<<std::endl<<devPath<<std::endl;
 
     sInfo.driverPath = devPath;
     sInfo.subDevPath = subdevPath;
