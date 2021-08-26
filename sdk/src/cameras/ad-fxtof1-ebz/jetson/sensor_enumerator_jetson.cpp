@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <glog/logging.h>
+#include <iostream>
 
 using namespace aditof;
 
