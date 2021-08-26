@@ -32,12 +32,7 @@
 #include "connections/target/target_sensor_enumerator.h"
 #include "sensor_names.h"
 #include "target_definitions.h"
-
-#include <dirent.h>
-#include <glog/logging.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+local::
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -72,7 +67,7 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
     buf[size] = '\0';
     std::string str(buf);
     /*Check if the obtained file has content dev and vide in it*/
-    if (str.find("dev")==string::npos || std.find("video")==string::npos)
+    if (str.find("dev")==string::npos || str.find("video")==string::npos)
     {
         LOG(WARNING) << "Generic error";
         return Status::GENERIC_ERROR;
@@ -84,6 +79,7 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
 
 
 Status TargetSensorEnumerator::searchSensors() {
+    Status status = Status::OK;
     LOG(INFO) << "Looking for devices on the target: Jetson";
 
     // TO DO: Don't guess the device, find a way to identify it so we are sure
@@ -94,16 +90,15 @@ Status TargetSensorEnumerator::searchSensors() {
     std::string devPath;
     std::string subdevPath;
 
-    status = local::findDevicePathsAtMedia(devPath, subdevPath);
+    status = findDevicePathsAtMedia(devPath, subdevPath);
     if (status != Status::OK) {
-        LOG(WARNING) << "failed to find device paths at media: " << media;
+        LOG(WARNING) << "failed to find device paths";
         return status;
     }
 
     if (devPath.empty() || subdevPath.empty()) {
         continue;
     }
-    DLOG(INFO) << "Considering: " << media << " an eligible TOF camera";
 
     sInfo.driverPath = devPath;
     sInfo.subDevPath = subdevPath;
