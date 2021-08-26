@@ -49,7 +49,6 @@ aditof::Status findDevicePathsAtMedia(std::string &dev_name,
 
     char *buf;
     int size = 0;
-    size_t idx = 0;
     
     /* Checking for available devices */
     char cmd[96];
@@ -102,7 +101,7 @@ Status TargetSensorEnumerator::searchSensors() {
     }
 
     if (devPath.empty() || subdevPath.empty()) {
-        continue;
+        return Status::GENERIC_ERROR;
     }
 
     sInfo.driverPath = devPath;
