@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
     if (status != Status::OK) {
         LOG(ERROR) << "Could not get frame data!";
         return 0;
-    }
+    }gti 
 
     if (!data1) {
         LOG(ERROR) << "no memory allocated in frame";
