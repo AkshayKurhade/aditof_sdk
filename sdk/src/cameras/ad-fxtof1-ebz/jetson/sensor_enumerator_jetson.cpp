@@ -44,6 +44,45 @@
 
 using namespace aditof;
 
+aditof::Status findDevicePathsAtMedia(std::string &dev_name,
+                                      std::string &subdev_name) {
+    using namespace aditof;
+    using namespace std;
+    
+    char *buf;
+    int size = 0;
+    size_t idx = 0;
+    
+    /* Checking for available devices */
+    char cmd[96];
+    sprintf(cmd, "v4l2-ctl --list-devices | grep addi9036 -A 2 | sed '1d' | sed 's/^[[:space:]]*//g' | sed '2d'");
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        LOG(WARNING) << "Error running media-ctl";
+        return Status::GENERIC_ERROR;
+    }   
+
+    /* Read the media-ctl output stream */
+    buf = (char *)malloc(128 * 1024);
+    while (!feof(fp)) {
+        fread(&buf[size], 1, 1, fp);
+        size++;
+    }
+    pclose(fp);
+    buf[size] = '\0';
+    std::string str(buf);
+    /*Check if the obtained file has content dev and vide in it*/
+    if (str.find("dev")==-1 || std.find("video")==-1)
+    {
+        LOG(WARNING) << "Generic error";
+        return Status::GENERIC_ERROR;
+    }
+    dev_name = str;
+    subdev_name = str;
+    return Status::OK;
+}
+
+
 Status TargetSensorEnumerator::searchSensors() {
     LOG(INFO) << "Looking for devices on the target: Jetson";
 
@@ -51,8 +90,23 @@ Status TargetSensorEnumerator::searchSensors() {
     // we've got the right sensor and it's compatible with the SDK
     SensorInfo sInfo;
     sInfo.sensorType = SensorType::SENSOR_ADDI9036;
-    sInfo.driverPath = "/dev/video0";
-    sInfo.subDevPath = "/dev/video0";
+
+    std::string devPath;
+    std::string subdevPath;
+
+    status = local::findDevicePathsAtMedia(devPath, subdevPath);
+    if (status != Status::OK) {
+        LOG(WARNING) << "failed to find device paths at media: " << media;
+        return status;
+    }
+
+    if (devPath.empty() || subdevPath.empty()) {
+        continue;
+    }
+    DLOG(INFO) << "Considering: " << media << " an eligible TOF camera";
+
+    sInfo.driverPath = devPath;
+    sInfo.subDevPath = subdevPath;
     sInfo.captureDev = CAPTURE_DEVICE_NAME;
     m_sensorsInfo.emplace_back(sInfo);
 
