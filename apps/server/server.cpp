@@ -59,6 +59,7 @@ bool sensors_are_created = false;
 /* Server only works with one depth sensor */
 std::shared_ptr<aditof::DepthSensorInterface> camDepthSensor;
 std::shared_ptr<aditof::V4lBufferAccessInterface> sensorV4lBufAccess;
+unsigned long long depthSensorTimestamp;
 
 static payload::ClientRequest buff_recv;
 static payload::ServerResponse buff_send;
@@ -369,6 +370,7 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
 
     case GET_AVAILABLE_FRAME_TYPES: {
         std::vector<aditof::FrameDetails> frameDetails;
+
         aditof::Status status =
             camDepthSensor->getAvailableFrameTypes(frameDetails);
         for (auto detail : frameDetails) {
@@ -437,6 +439,10 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         buff_send.add_int32_payload(1);
         buff_send.add_bytes_payload(buffer, buf_data_len * sizeof(uint8_t));
 #endif
+
+        auto bufDetails = buff_send.mutable_buffer_details();
+        bufDetails->set_timestamp(buf.timestamp.tv_sec * 1000000 +
+                                  buf.timestamp.tv_usec);
 
         status = sensorV4lBufAccess->enqueueInternalBuffer(buf);
         if (status != aditof::Status::OK) {

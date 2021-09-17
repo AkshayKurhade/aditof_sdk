@@ -538,7 +538,8 @@ aditof::Status Addi9036Sensor::program(const uint8_t *firmware, size_t size) {
     return status;
 }
 
-aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer) {
+aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer,
+                                        aditof::BufferInfo *bufferInfo) {
     using namespace aditof;
     struct v4l2_buffer buf[m_implData->numVideoDevs];
     struct VideoDev *dev;
@@ -721,6 +722,9 @@ aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer) {
             return status;
         }
     }
+
+    bufferInfo->timestamp =
+        buf[0].timestamp.tv_sec * 1000000 + buf[0].timestamp.tv_usec;
 
     return status;
 }

@@ -344,7 +344,8 @@ aditof::Status NetworkDepthSensor::program(const uint8_t *firmware,
     return status;
 }
 
-aditof::Status NetworkDepthSensor::getFrame(uint16_t *buffer) {
+aditof::Status NetworkDepthSensor::getFrame(uint16_t *buffer,
+                                            aditof::BufferInfo *bufferInfo) {
     using namespace aditof;
 
     if (buffer == nullptr) {
@@ -401,6 +402,9 @@ aditof::Status NetworkDepthSensor::getFrame(uint16_t *buffer) {
                              m_implData->frameDetails_cache.fullDataHeight);
     }
 
+    if (bufferInfo) {
+        bufferInfo->timestamp = net->recv_buff.buffer_details().timestamp();
+    }
     return status;
 }
 
