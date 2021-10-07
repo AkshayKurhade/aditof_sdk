@@ -37,7 +37,7 @@ option(USE_FXTOF1 "Use FXTOF1 camera?" OFF)
 option(USE_3D_SMART "Use 3D Smart camera?" OFF)
 option(WITH_TOOLS "Build tools?" OFF)
 option(IGNORE_TARGET_VERSION "Ignore sdk version on target?" OFF)
-
+add_subdirectory(apps)
 # Throw error if more than one camera is selected
 if ( USE_CHICONY AND USE_FXTOF1)
     message( FATAL_ERROR "USE_CHICONY and USE_FXTOF1 are both selected. \nPlease select a single camera. CMake will exit." )
