@@ -149,7 +149,7 @@ int Network::ServerConnect(const std::string &ip) {
     struct lws_client_connect_info ccinfo = {0};
     ccinfo.context = this->context;
     ccinfo.address = ip.c_str();
-    ccinfo.port = 5051;
+    ccinfo.port = 50051;
     ccinfo.path = "/";
     ccinfo.host = lws_canonical_hostname(this->context);
     ccinfo.origin = "origin";
