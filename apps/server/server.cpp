@@ -243,7 +243,7 @@ int main(int argc, char *argv[]) {
     struct lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
 
-    info.port = 5051;
+    info.port = 50021;
     info.protocols = protocols;
     info.gid = -1;
     info.uid = -1;
