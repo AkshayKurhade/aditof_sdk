@@ -25,19 +25,7 @@ file(GLOB HEADERS
     ${CMAKE_SOURCE_DIR}/sdk/include/aditof/*.h
 )
 
-if (USE_CHICONY)
-    if (NOT RASPBERRYPI)
-        message( FATAL_ERROR "USE_CHICONY only works when on RaspberryPI. CMake will exit." )
-    endif()
-    set(CAMERA_DIR "cameras/chicony-006")
-elseif(USE_FXTOF1)
-    set(CAMERA_DIR "cameras/ad-fxtof1-ebz")
-elseif(USE_3D_SMART)
-    set(CAMERA_DIR "cameras/3d-smart-camera")
-else ()
-    set(CAMERA_DIR "cameras/ad-96tof1-ebz")
-endif()    
-
+# Create some variables and definitions based on the OS (or platform)
 if( WIN32 )
         set(OS_SPECIFIC_DIR "connections/usb/windows")
 elseif( APPLE )
@@ -72,6 +60,37 @@ else()
     message(FATAL_ERROR "Platform not supported")
 endif()
 
+# Choose the camera sources to build (on remote we build all cameras)
+if (ON_TARGET)
+  if(USE_FXTOF1)
+    set(CAMERA_DIR "cameras/ad-fxtof1-ebz")
+  elseif(USE_3D_SMART)
+    set(CAMERA_DIR "cameras/3d-smart-camera")
+  else ()
+    set(CAMERA_DIR "cameras/ad-96tof1-ebz")
+  endif()
+
+  file(GLOB ONE_CAMERA_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/${TARGET_SPECIFIC_DIR}/*.cpp
+  )
+  file(GLOB ONE_CAMERA_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/${TARGET_SPECIFIC_DIR}/*.h
+  )
+else()
+    file(GLOB ALL_CAMERAS_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/ad-fxtof1-ebz/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/3d-smart-camera/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/ad-96tof1-ebz/*.cpp
+    )
+    file(GLOB ALL_CAMERAS_HEADERS
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/ad-fxtof1-ebz/*.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/3d-smart-camera/*.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/cameras/ad-96tof1-ebz/*.h
+    )
+endif()
+
 if (NOT APPLE AND NOT WIN32)
     option(RUN_LDCONFIG "Run ldconfig after install." ON)
 endif()
@@ -83,18 +102,13 @@ endif()
 # Platform specific sources and headers
 file(GLOB PLATFORM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/${OS_SPECIFIC_DIR}/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/${TARGET_SPECIFIC_DIR}/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/connections/usb/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/connections/utils/*.cpp
-
 )
 file(GLOB PLATFORM_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/${OS_SPECIFIC_DIR}/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/connections/usb/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/connections/utils/*.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/*.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/${TARGET_SPECIFIC_DIR}/*.h
 )
 
 file(GLOB NETWORK_SOURCES
@@ -109,6 +123,10 @@ add_library(${PROJECT_NAME} SHARED
     ${SOURCES}
     ${PLATFORM_SOURCES}
     ${PLATFORM_HEADERS}
+    $<$<BOOL:${ON_TARGET}>:${ONE_CAMERA_SOURCES}>
+    $<$<BOOL:${ON_TARGET}>:${ONE_CAMERA_HEADERS}>
+    $<$<NOT:$<BOOL:${ON_TARGET}>>:${ALL_CAMERAS_SOURCES}>
+    $<$<NOT:$<BOOL:${ON_TARGET}>>:${ALL_CAMERAS_HEADERS}>
     $<$<BOOL:${WITH_NETWORK}>:${NETWORK_SOURCES}>
     $<$<BOOL:${WITH_NETWORK}>:${NETWORK_HEADERS}>
     $<$<BOOL:${WITH_NETWORK}>:${PROTO_SRCS}>
@@ -125,7 +143,8 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
         src/
         src/${OS_SPECIFIC_DIR}/${TARGET_SPECIFIC_DIR}
-        src/${CAMERA_DIR}/
+        $<$<BOOL:${ON_TARGET}>:${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}>
+        $<$<BOOL:${ON_TARGET}>:${CMAKE_CURRENT_SOURCE_DIR}/src/${CAMERA_DIR}/${TARGET_SPECIFIC_DIR}>
         ${Protobuf_INCLUDE_DIRS}
         ${GENERATED_PROTO_FILES_DIR}
         ${LIBWEBSOCKETS_INCLUDE_DIRS}
@@ -151,20 +170,6 @@ else()
         PUBLIC
             glog::glog
     )
-endif()
-
-if (USE_CHICONY AND RASPBERRYPI)
-    if (NOT DEFINED CHICONY_EEPROM_SO)
-        set(CHICONY_EEPROM_SO "${CMAKE_SOURCE_DIR}/misc/chicony/libChicony_EEPROM.so")
-    endif()
-
-    add_library(chicony-eeprom SHARED IMPORTED)
-    set_target_properties(chicony-eeprom PROPERTIES
-        IMPORTED_LOCATION ${CHICONY_EEPROM_SO}
-        IMPORTED_NO_SONAME 1
-    )
-
-    target_link_libraries(${PROJECT_NAME} PRIVATE chicony-eeprom)
 endif()
 
 if (CMAKE_COMPILER_IS_GNUCC)

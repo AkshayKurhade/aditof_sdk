@@ -38,7 +38,8 @@
 #define EEPROM_SIZE 131072
 
 Calibration96Tof1::Calibration96Tof1()
-    : m_depth_cache(nullptr), m_geometry_cache(nullptr), m_range(16000) {
+    : m_intrinsics(nullptr), m_distCoeffs(nullptr), m_depth_cache(nullptr),
+      m_distortion_cache(nullptr), m_geometry_cache(nullptr), m_range(16000) {
     std::unordered_map<float, param_struct> Header;
     Header[EEPROM_VERSION].value = {0};
     Header[EEPROM_VERSION].size =
@@ -78,6 +79,18 @@ Calibration96Tof1::~Calibration96Tof1() {
 
     if (m_geometry_cache) {
         delete[] m_geometry_cache;
+    }
+
+    if (m_distortion_cache) {
+        delete[] m_distortion_cache;
+    }
+
+    if (m_intrinsics) {
+        delete[] m_intrinsics;
+    }
+
+    if (m_distCoeffs) {
+        delete[] m_distCoeffs;
     }
 }
 
@@ -365,6 +378,7 @@ aditof::Status Calibration96Tof1::setMode(const std::string &mode, int range,
 
     Status status = Status::OK;
     std::vector<float> cameraMatrix;
+    std::vector<float> distortionCoeffs;
     const int16_t pixelMaxValue = (1 << 12) - 1; // 4095
     float gain = 1.0, offset = 0.0;
 
@@ -392,6 +406,14 @@ aditof::Status Calibration96Tof1::setMode(const std::string &mode, int range,
                   << "    cy: " << cameraMatrix[5];
     }
     buildGeometryCalibrationCache(cameraMatrix, frameWidth, frameHeight);
+
+    status = getIntrinsic(DISTORTION_COEFFICIENTS, distortionCoeffs);
+    if (status != Status::OK) {
+        LOG(WARNING) << "Failed to read distortion coeffs from eeprom";
+        return status;
+    }
+    buildDistortionCorrectionCache(cameraMatrix, distortionCoeffs, frameWidth,
+                                   frameHeight);
 
     return status;
 }
@@ -527,4 +549,113 @@ float Calibration96Tof1::getPacketSize(
             mapElement.second.size + 8; // Added 8 for size of key and size
     }
     return packet_size;
+}
+
+void Calibration96Tof1::buildDistortionCorrectionCache(
+    const std::vector<float> &cameraMatrix,
+    const std::vector<float> &distortionCoeffs, unsigned int width,
+    unsigned int height) {
+    using namespace aditof;
+
+    //DISTORTION_COEFFICIENTS for [k1, k2, p1, p2, k3]
+    m_distCoeffs = new double[5];
+    m_intrinsics = new double[4];
+    for (int i = 0; i < 5; i++) {
+        m_distCoeffs[i] = double(distortionCoeffs.at(i));
+    }
+
+    m_intrinsics[0] = double(cameraMatrix[0]);
+    m_intrinsics[1] = double(cameraMatrix[4]);
+    m_intrinsics[2] = double(cameraMatrix[2]);
+    m_intrinsics[3] = double(cameraMatrix[5]);
+
+    double fx = m_intrinsics[0];
+    double fy = m_intrinsics[1];
+    double cx = m_intrinsics[2];
+    double cy = m_intrinsics[3];
+
+    if (m_distortion_cache) {
+        delete[] m_distortion_cache;
+    }
+
+    m_distortion_cache = new double[width * height];
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            double x = (i - cx) / fx;
+            double y = (j - cy) / fy;
+
+            double r2 = x * x + y * y;
+            double k_calc =
+                double(1 + m_distCoeffs[0] * r2 + m_distCoeffs[1] * r2 * r2 +
+                       m_distCoeffs[4] * r2 * r2 * r2);
+            m_distortion_cache[j * width + i] = k_calc;
+        }
+    }
+}
+
+aditof::Status Calibration96Tof1::distortionCorrection(uint16_t *frame,
+                                                       unsigned int width,
+                                                       unsigned int height) {
+    using namespace aditof;
+
+    double fx = m_intrinsics[0];
+    double fy = m_intrinsics[1];
+    double cx = m_intrinsics[2];
+    double cy = m_intrinsics[3];
+
+    uint16_t *buff;
+
+    buff = new uint16_t[width * height];
+
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            //transform in dimensionless space
+            double x = (double(i) - cx) / fx;
+            double y = (double(j) - cy) / fy;
+
+            //apply correction
+            double x_dist_adim = x * m_distortion_cache[j * width + i];
+            double y_dist_adim = y * m_distortion_cache[j * width + i];
+
+            //back to original space
+            int x_dist = (int)(x_dist_adim * fx + cx);
+            int y_dist = (int)(y_dist_adim * fy + cy);
+
+            if (x_dist >= 0 && x_dist < width && y_dist >= 0 &&
+                y_dist < height) {
+                buff[j * width + i] = frame[y_dist * width + x_dist];
+            } else {
+                buff[j * width + i] = frame[j * width + i];
+            }
+        }
+    }
+
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            //transform in dimensionless space
+            double x = (double(i) - cx) / fx;
+            double y = (double(j) - cy) / fy;
+            double r2 = x * x + y * y;
+
+            //apply correction
+            double x_dist_adim = x + (2 * m_distCoeffs[2] * x * y +
+                                      m_distCoeffs[3] * (r2 + 2 * x * x));
+            double y_dist_adim = y + (m_distCoeffs[2] * (r2 + 2 * y * y) +
+                                      2 * m_distCoeffs[3] * x * y);
+
+            //back to original space
+            int x_dist = (int)(x_dist_adim * fx + cx);
+            int y_dist = (int)(y_dist_adim * fy + cy);
+
+            if (x_dist >= 0 && x_dist < width && y_dist >= 0 &&
+                y_dist < height) {
+                frame[j * width + i] = buff[y_dist * width + x_dist];
+            } else {
+                frame[j * width + i] = buff[j * width + i];
+            }
+        }
+    }
+
+    delete[] buff;
+    return Status::OK;
 }

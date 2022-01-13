@@ -141,29 +141,21 @@ if %opt%==0 (
 )
 echo Setup will continue with the configuration: %config_type%
 
-::check if the generator is correct
+::check if the generator is correct (keep the mechanism in case newer versions of msvc will be added)
 set /a opt=0
 set vs=15
 if %generator%=="Visual Studio 16 2019" (
     set /a opt=1
     set vs=15
 )
-if %generator%=="Visual Studio 15 2017 Win64" (
-    set /a opt=1
-    set vs=15
-)
-if %generator%=="Visual Studio 14 2015 Win64" (
-    set /a opt=1
-    set vs=14
-)
 
 if %set_generator%==0 (
    set /a opt=1
-   set generator="Visual Studio 15 2017 Win64"
+   set generator="Visual Studio 16 2019"
    set vs=15
    )
 if %opt%==0 (
-    echo Please enter a correct configuration ("Visual Studio 16 2019"; "Visual Studio 15 2017 Win64" or "Visual Studio 14 2015 Win64"^)
+    echo Please enter a correct configuration ("Visual Studio 16 2019"^)
     EXIT /B %ERRORLEVEL%
 )
 echo Setup will continue with the generator: %generator%
@@ -217,9 +209,9 @@ CALL :install_websockets %config_type% %generator%
 set CMAKE_OPTIONS=-DWITH_PYTHON=on -DWITH_OPENCV=on
 pushd %build_dire%
 cmake -G %generator% -DWITH_PYTHON=on -DWITH_OPENCV=on -DOpenCV_DIR="%openCVPath%\build\x64\%vs%\lib" -DCMAKE_PREFIX_PATH="%deps_install_dir%\glog;%deps_install_dir%\protobuf;%deps_install_dir%\libwebsockets" -DOPENSSL_INCLUDE_DIRS="%openSSLPath%\include" %source_dir%
-cmake --build . --config %config_type%
-cmake --build . --config %config_type% --target copy-dll-opencv 
-cmake --build . --config %config_type% --target copy-dll-example
+cmake --build . --config %config_type% -j 4
+cmake --build . --config %config_type% --target copy-dll-opencv -j 4
+cmake --build . --config %config_type% --target copy-dll-example -j 4
 popd
 EXIT /B %ERRORLEVEL%
 
@@ -237,8 +229,6 @@ ECHO -i^|--depsinstalldir
 ECHO        Specify the directory where the dependencies will be installed.
 ECHO -g^|--generator
 ECHO        Visual Studio 16 2019 = Generates Visual Studio 2019 project files.
-ECHO        Visual Studio 15 2017 Win64 = Generates Visual Studio 2017 project files.
-ECHO        Visual Studio 14 2015 Win64 = Generates Visual Studio 2015 project files.
 ECHO -c^|--configuration
 ECHO        Release = Configuration for Release build.
 ECHO        Debug   = Configuration for Debug build.
@@ -263,7 +253,7 @@ git checkout tags/v0.3.5
 if not exist "build_0_3_5" ( mkdir build_0_3_5 )
 pushd build_0_3_5
 cmake -DWITH_GFLAGS=off -DCMAKE_INSTALL_PREFIX=%deps_install_dir%\glog -G %generator% ..
-cmake --build . --target install --config %configuration%
+cmake --build . --target install --config %configuration% -j 4
 popd
 popd
 popd
@@ -278,7 +268,7 @@ pushd protobuf
 if not exist "build_3_9_0" ( mkdir build_3_9_0 )
 pushd build_3_9_0
 cmake -Dprotobuf_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=%deps_install_dir%\protobuf -Dprotobuf_MSVC_STATIC_RUNTIME=OFF -G %generator% ..\cmake\
-cmake --build . --target install --config %configuration%
+cmake --build . --target install --config %configuration% -j 4
 popd
 popd
 popd
@@ -288,12 +278,12 @@ EXIT /B 0
 set configuration=%~1
 echo "Installing websockets with config=%configuration% and generator=%generator%"
 pushd %deps_dir%
-if not exist "libwebsockets" ( git clone --branch v3.1-stable --depth 1  https://libwebsockets.org/repo/libwebsockets )
+if not exist "libwebsockets" ( git clone --branch v3.2.3 --depth 1  https://libwebsockets.org/repo/libwebsockets )
 pushd libwebsockets
-if not exist "build_3_1_stable" ( mkdir build_3_1_stable )
-pushd build_3_1_stable
+if not exist "build_3_2_3" ( mkdir build_3_2_3 )
+pushd build_3_2_3
 cmake -DOPENSSL_ROOT_DIR="%openSSLPath%" -DCMAKE_INSTALL_PREFIX=%deps_install_dir%\libwebsockets -G %generator% ..
-cmake --build . --target install --config %configuration%
+cmake --build . --target install --config %configuration% -j 4
 popd
 popd
 popd

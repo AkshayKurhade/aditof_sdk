@@ -181,6 +181,20 @@ void getAvailHW(imaqkit::IHardwareInfo *hardwareContainer) {
 
     deviceInfo->addDeviceFormat(deviceFormat);
 
+    deviceFormat = deviceInfo->createDeviceFormat(
+        aditof::RGB_CAMERA_FORMAT_ID, aditof::RGB_CAMERA_FORMAT_STR);
+
+    DeviceFormat *rgbCameraFormatInfo = new DeviceFormat();
+
+    rgbCameraFormatInfo->setFormatWidth(aditof::RGB_CAMERA_FORMAT_WIDTH);
+    rgbCameraFormatInfo->setFormatHeight(aditof::RGB_CAMERA_FORMAT_HEIGHT);
+    rgbCameraFormatInfo->setFormatNumBands(aditof::RGB_CAMERA_FORMAT_BANDS);
+    rgbCameraFormatInfo->setFormatFrameType(imaqkit::frametypes::BAYER12_BGGR);
+
+    deviceFormat->setAdaptorData(rgbCameraFormatInfo);
+
+    deviceInfo->addDeviceFormat(deviceFormat);
+
     hardwareContainer->addDevice(deviceInfo);
 }
 
@@ -266,13 +280,19 @@ void getDeviceAttributes(const imaqkit::IDeviceInfo *deviceInfo,
 
         // Property for setting the displayed frame type
         // Options are: Depth, Ir
-        hProp = devicePropFact->createEnumProperty(aditof::FRAME_TYPE_STR,
-                                                   aditof::FRAME_TYPE_DEPTH_STR,
-                                                   aditof::FRAME_TYPE_DEPTH_ID);
-        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_IR_STR,
-                                     aditof::FRAME_TYPE_IR_ID);
-        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_RAW_DEPTH_STR,
-                                     aditof::FRAME_TYPE_RAW_DEPTH_ID);
+        hProp = devicePropFact->createEnumProperty(
+            aditof::FRAME_TYPE_STR, aditof::FRAME_TYPE_DEPTH_RGB_STR,
+            aditof::FRAME_TYPE_DEPTH_RGB_ID);
+        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_IR_RGB_STR,
+                                     aditof::FRAME_TYPE_IR_RGB_ID);
+        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_DEPTH_RAW_STR,
+                                     aditof::FRAME_TYPE_DEPTH_RAW_ID);
+        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_IR_RAW_STR,
+                                     aditof::FRAME_TYPE_IR_RAW_ID);
+        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_DEPTH_IR_RAW_STR,
+                                     aditof::FRAME_TYPE_DEPTH_IR_RAW_ID);
+        devicePropFact->addEnumValue(hProp, aditof::FRAME_TYPE_RGB_STR,
+                                     aditof::FRAME_TYPE_RGB_ID);
 
         devicePropFact->setPropReadOnly(hProp,
                                         imaqkit::propreadonly::WHILE_RUNNING);
@@ -281,12 +301,41 @@ void getDeviceAttributes(const imaqkit::IDeviceInfo *deviceInfo,
         // Property for setting the small signal removal value
         // Range is 0 - 16383
         hProp = devicePropFact->createIntProperty(
-            aditof::SMALL_SIGNAL_STR, aditof::SMALL_SIGNAL_LOWER_LIMIT,
-            aditof::SMALL_SIGNAL_UPPER_LIMIT, aditof::SMALL_SIGNAL_DEFAULT);
+            aditof::NOISE_REDUCTION_THRESHOLD_STR,
+            aditof::NOISE_REDUCTION_THRESHOLD_LOWER_LIMIT,
+            aditof::NOISE_REDUCTION_THRESHOLD_UPPER_LIMIT,
+            aditof::NOISE_REDUCTION_THRESHOLD_DEFAULT);
+        devicePropFact->setPropReadOnly(hProp,
+                                        imaqkit::propreadonly::WHILE_RUNNING);
+        devicePropFact->addProperty(
+            hProp, aditof::ADITOF_PROPERTY_NOISE_REDUCTION_THRESHOLD);
+
+        hProp = devicePropFact->createStringProperty(
+            aditof::IR_GAMMA_CORRECTION_STR,
+            aditof::IR_GAMMA_CORRECTION_DEFAULT);
+        devicePropFact->setPropReadOnly(hProp,
+                                        imaqkit::propreadonly::WHILE_RUNNING);
+        devicePropFact->addProperty(
+            hProp, aditof::ADITOF_PROPERTY_IR_GAMMA_CORRECTION);
+
+        hProp = devicePropFact->createIntProperty(
+            aditof::DEPTH_CORRECTION_STR, aditof::DEPTH_CORRECTION_LOWER_LIMIT,
+            aditof::DEPTH_CORRECTION_UPPER_LIMIT,
+            aditof::DEPTH_CORRECTION_DEFAULT);
         devicePropFact->setPropReadOnly(hProp,
                                         imaqkit::propreadonly::WHILE_RUNNING);
         devicePropFact->addProperty(hProp,
-                                    aditof::ADITOF_PROPERTY_SMALL_SIGNAL);
+                                    aditof::ADITOF_PROPERTY_DEPTH_CORRECTION);
+
+        hProp = devicePropFact->createIntProperty(
+            aditof::GEOMETRY_CORRECTION_STR,
+            aditof::GEOMETRY_CORRECTION_LOWER_LIMIT,
+            aditof::GEOMETRY_CORRECTION_UPPER_LIMIT,
+            aditof::GEOMETRY_CORRECTION_DEFAULT);
+        devicePropFact->setPropReadOnly(hProp,
+                                        imaqkit::propreadonly::WHILE_RUNNING);
+        devicePropFact->addProperty(
+            hProp, aditof::ADITOF_PROPERTY_GEOMETRY_CORRECTION);
 
         // Temp readings
         hProp = devicePropFact->createStringProperty(

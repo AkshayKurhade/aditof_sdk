@@ -4,15 +4,18 @@
 ## Building the SDK only
 
 ### Pre-requisites
-* Install MS Visual Studio 14 2015
+* Install MS Visual Studio 16 2019
 * Install MS .NET Framework 4.5
 * CMake
 * Glog v0.3.5
-* Libwebsockets v3.1
+* Libwebsockets v3.2.3
   * OpenSSL
 * Protocol Buffers v3.9.0
 
 ### Installing the dependencies
+> NOTE: To speed up the process please replace the value from the -j argument in the make/cmake command
+> with the number of cores in your system
+
 * CMake
 
 Windows installer can be downloaded from: https://cmake.org/download/
@@ -22,20 +25,20 @@ Windows installer can be downloaded from: https://cmake.org/download/
 git clone --branch v0.3.5 --depth 1 https://github.com/google/glog
 cd glog
 mkdir build_0_3_5 && cd build_0_3_5
-cmake -DWITH_GFLAGS=off -DCMAKE_INSTALL_PREFIX=./local_path/glog -G "Visual Studio 14 2015 Win64" ..
-cmake --build . --target install --config Debug
-cmake --build . --target install --config Release
+cmake -DWITH_GFLAGS=off -DCMAKE_INSTALL_PREFIX=./local_path/glog -G "Visual Studio 16 2019" ..
+cmake --build . --target install --config Debug -j 4
+cmake --build . --target install --config Release -j 4
 ```
 
 * Libwebsockets:
 Libewbesockets needs OpenSSL. One option to get it on windows is from: https://slproweb.com/products/Win32OpenSSL.html. Make sure to get the developer package and not the light weight package.
 ```console
-git clone --branch v3.1-stable --depth 1 https://github.com/warmcat/libwebsockets
+git clone --branch v3.2.3 --depth 1 https://github.com/warmcat/libwebsockets
 cd libwebsockets
-mkdir build_3_1 && cd build_3_1
-cmake -DOPENSSL_ROOT_DIR="C:\OpenSSL-Win64" -DCMAKE_INSTALL_PREFIX=./local_path/websockets -G "Visual Studio 14 2015 Win64" ..
-cmake --build . --target install --config Debug
-cmake --build . --target install --config Release
+mkdir build_3_2_3 && cd build_3_2_3
+cmake -DOPENSSL_ROOT_DIR="C:\OpenSSL-Win64" -DCMAKE_INSTALL_PREFIX=./local_path/websockets -G "Visual Studio 16 2019" ..
+cmake --build . --target install --config Debug -j 4
+cmake --build . --target install --config Release -j 4
 ```
 
 * Protobuf:
@@ -43,9 +46,9 @@ cmake --build . --target install --config Release
 git clone --branch v3.9.0 --depth 1 https://github.com/protocolbuffers/protobuf
 cd protobuf
 mkdir build_3_9_0 && cd build_3_9_0
-cmake -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_MSVC_STATIC_RUNTIME=OFF -DCMAKE_INSTALL_PREFIX=./local_path/protobuf -G "Visual Studio 14 2015 Win64" ../cmake
-cmake --build . --target install --config Debug
-cmake --build . --target install --config Release
+cmake -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_MSVC_STATIC_RUNTIME=OFF -DCMAKE_INSTALL_PREFIX=./local_path/protobuf -G "Visual Studio 16 2019" ../cmake
+cmake --build . --target install --config Debug -j 4
+cmake --build . --target install --config Release -j 4
 ```
 
 ### Download and build SDK only
@@ -55,8 +58,8 @@ git clone https://github.com/analogdevicesinc/aditof_sdk
 cd aditof_sdk
 mkdir build
 cd build
-cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_path\glog;C:\projects\aditof-sdk\deps\protobuf\build_3_9_0\local_path\protobuf;C:\projects\aditof-sdk\deps\libwebsockets\build_3_1\local_path\websockets" -G "Visual Studio 14 2015 Win64" -DOPENSSL_INCLUDE_DIRS="C:\OpenSSL-Win64\include" -DWITH_EXAMPLES=off ..
-cmake --build . --config Release
+cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_path\glog;C:\projects\aditof-sdk\deps\protobuf\build_3_9_0\local_path\protobuf;C:\projects\aditof-sdk\deps\libwebsockets\build_3_2_3\local_path\websockets" -G "Visual Studio 16 2019" -DOPENSSL_INCLUDE_DIRS="C:\OpenSSL-Win64\include" -DWITH_EXAMPLES=off ..
+cmake --build . --config Release -j 4
 ```
 
 ## Building the SDK with examples
@@ -71,13 +74,13 @@ cmake --build . --config Release
 
 ```
 OPENCV_DIR=path_to_opencv_installation_dir\build
-OPENCV_PATH=path_to_opencv_installation_dir\build\x64\vc14\bin
+OPENCV_PATH=path_to_opencv_installation_dir\build\x64\vc15\bin
 ```
 
 For instance, if OpenCV were to be installed at: C:\opencv, then the variable should look like this:
 ```
 OPENCV_DIR=C:\opencv\build
-OPENCV_PATH=C:\opencv\build\x64\vc14\bin
+OPENCV_PATH=C:\opencv\build\x64\vc15\bin
 ```
 
 ### Build SDK with examples and in Visual Studio
@@ -86,9 +89,9 @@ OPENCV_PATH=C:\opencv\build\x64\vc14\bin
 cd aditof_sdk
 mkdir build
 cd build
-cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_path\glog;C:\projects\aditof-sdk\deps\protobuf\build_3_9_0\local_path\protobuf;C:\projects\aditof-sdk\deps\libwebsockets\build_3_1\local_path\websockets" -G "Visual Studio 14 2015 Win64" -DOPENSSL_INCLUDE_DIRS="C:\OpenSSL-Win64\include" -DWITH_EXAMPLES=on ..
+cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_path\glog;C:\projects\aditof-sdk\deps\protobuf\build_3_9_0\local_path\protobuf;C:\projects\aditof-sdk\deps\libwebsockets\build_3_2_3\local_path\websockets" -G "Visual Studio 16 2019" -DOPENSSL_INCLUDE_DIRS="C:\OpenSSL-Win64\include" -DWITH_EXAMPLES=on ..
 ```
-- Open 'adi_tof_project.sln' generated in 'aditof_sdk\build' in MS Visual Studio 2015
+- Open 'adi_tof_project.sln' generated in 'aditof_sdk\build' in MS Visual Studio 2019
 - Select 'Release' build
 - Application binaries are created in 'aditof_sdk\build\example\aditof-demo\Release' directory
 
@@ -106,10 +109,10 @@ cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_pa
 
 ### Steps to build the SDK
 - Run the script located in: 'aditof_sdk\scripts\windows' with the suitable configuration parameters. <br>
-The following example runs the script with generator **Visual Studio 14 2015 Win64** and configuration **Release**. The sdk will be built in folder: **current_script_path\build** and the dependencies will be installed in folder: **current_script_path\deps\installed**.
+The following example runs the script with generator **Visual Studio 16 2019** and configuration **Release**. The sdk will be built in folder: **current_script_path\build** and the dependencies will be installed in folder: **current_script_path\deps\installed**.
 Use parameter *-h* or *--help* for more information regarding the parameters. 
 ```
-.\setup_project.bat -g "Visual Studio 14 2015 Win64" -c Release
+.\setup_project.bat -g "Visual Studio 16 2019" -c Release
 ```
 - Open 'adi_tof_project.sln' generated in **current_script_path\build** in MS Visual Studio.
 
@@ -132,3 +135,43 @@ Use parameter *-h* or *--help* for more information regarding the parameters.
 ![Display Image](/doc/img/run_VS.PNG) 
 
 - Application executable is created in **current_script_path\build\example\aditof-demo\Release** directory.
+
+### Enabling the point cloud display in aditof-demo
+
+ OpenCV needs to be built manually in order to visualize pointCloud data because the prebuild libraries do not come with the viz module installed.
+ The steps required for building and including the required dependencies are presented below:
+ 
+ Requirements:
+ * OpenCV 4.5.0
+   * VTK 8.2
+
+* VTK 8.2
+```console
+git clone --branch v8.2.0 --depth 1 https://github.com/Kitware/VTK.git
+cd VTK
+mkdir build_8_2_0 && cd build_8_2_0
+cmake -DCMAKE_INSTALL_PREFIX=./local_path/vtk -G "Visual Studio 16 2019" ..
+cmake --build . --target install --config Release -j 4
+```
+
+* OpenCV
+```console
+git clone --branch 4.5.0 --depth 1 https://github.com/opencv/opencv.git
+git clone --branch 4.5.0 --depth 1 https://github.com/opencv/opencv_contrib.git
+cp -r .\opencv_contrib\modules\viz .\opencv\modules\
+cd opencv
+mkdir build_4_5_0 && cd build_4_5_0
+cmake -DWITH_VTK=ON -DBUILD_opencv_viz=ON -DBUILD_opencv_world=ON -DCMAKE_PREFIX_PATH=./local_path/vtk -DCMAKE_INSTALL_PREFIX=./local_path/opencv -G "Visual Studio 16 2019" ..
+cmake --build . --target install --config Release -j 4
+```
+Add the path from ./local_path/vtk/bin to enviroment variables to load them at runtine.
+
+Compile the sdk and add OpenCV to CMAKE_PREFIX_PATH:
+
+```console
+cd aditof_sdk
+mkdir build
+cd build
+cmake -DCMAKE_PREFIX_PATH="C:\projects\aditof-sdk\deps\glog\build_0_3_5\local_path\glog;C:\projects\aditof-sdk\deps\protobuf\build_3_9_0\local_path\protobuf;C:\projects\aditof-sdk\deps\libwebsockets\build_3_2_3\local_path\websockets;C:\projects\aditof-sdk\deps\opencv\build_4_5_0\local_path\opencv" -G "Visual Studio 16 2019" -DOPENSSL_INCLUDE_DIRS="C:\OpenSSL-Win64\include" -DWITH_EXAMPLES=on ..
+cmake --build . --target install --config Release -j 4
+```

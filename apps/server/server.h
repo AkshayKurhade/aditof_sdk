@@ -33,7 +33,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <libwebsockets.h>
 
-#define RX_BUFFER_BYTES (1229500)
+#define RX_BUFFER_BYTES (4147900 * 2)
 
 enum api_Values {
     API_NOT_DEFINED,
@@ -56,6 +56,7 @@ enum api_Values {
     TEMPERATURE_SENSOR_CLOSE,
     HANG_UP,
     GET_CONNECTION_STRING,
+    GET_CAMERA_TYPE,
 };
 
 enum protocols { PROTOCOL_EXAMPLE, PROTOCOL_COUNT };

@@ -32,6 +32,13 @@
 #ifndef CAMERA_3D_SMART_H
 #define CAMERA_3D_SMART_H
 
+#define RED_START_POZ_X 1
+#define RED_START_POZ_Y 1
+
+#define RED 0
+#define GREEN 1
+#define BLUE 2
+
 #include "calibration_3d_smart.h"
 
 #include <aditof/camera.h>
@@ -39,6 +46,7 @@
 #include <aditof/storage_interface.h>
 #include <aditof/temperature_sensor_interface.h>
 
+#include <map>
 #include <memory>
 
 class Camera3D_Smart : public aditof::Camera {
@@ -46,6 +54,12 @@ class Camera3D_Smart : public aditof::Camera {
     Camera3D_Smart(
         std::shared_ptr<aditof::DepthSensorInterface> depthSensor,
         std::shared_ptr<aditof::DepthSensorInterface> rgbSensor,
+        std::vector<std::shared_ptr<aditof::StorageInterface>> &eeproms,
+        std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>>
+            &tSensors);
+
+    Camera3D_Smart(
+        std::shared_ptr<aditof::DepthSensorInterface> depthSensor,
         std::vector<std::shared_ptr<aditof::StorageInterface>> &eeproms,
         std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>>
             &tSensors);
@@ -85,10 +99,21 @@ class Camera3D_Smart : public aditof::Camera {
     aditof::Status setNoiseReductionTreshold(uint16_t treshold);
     aditof::Status setIrGammaCorrection(float gamma);
 
+#ifdef BAYER_CONVERSION
+    float verticalKernel(uint8_t *pData, int x, int y, int width, int height);
+    float horizontalKernel(uint8_t *pData, int x, int y, int width, int height);
+    float plusKernel(uint8_t *pData, int x, int y, int width, int height);
+    float crossKernel(uint8_t *pData, int x, int y, int width, int height);
+    float directCopy(uint8_t *buffer, int x, int y, int width, int height);
+    float getValueFromData(uint8_t *pData, int x, int y, int width, int height);
+    void bayer2RGB(uint16_t *buffer, uint8_t *pData, int width, int height);
+#endif
+
   private:
     aditof::CameraDetails m_details;
     std::shared_ptr<aditof::DepthSensorInterface> m_depthSensor;
     std::shared_ptr<aditof::DepthSensorInterface> m_rgbSensor;
+    std::shared_ptr<aditof::DepthSensorInterface> m_rgbdSensor;
     std::shared_ptr<aditof::StorageInterface> m_eeprom;
     std::shared_ptr<aditof::TemperatureSensorInterface> m_temperatureSensor;
     bool m_devStarted;
@@ -101,7 +126,14 @@ class Camera3D_Smart : public aditof::Camera {
     float m_irGammaCorrection;
     bool m_depthCorrection;
     bool m_cameraGeometryCorrection;
+    bool m_cameraBayerRgbConversion;
+    bool m_cameraDistortionCorrection;
+    bool m_irDistorsionCorrection;
     std::string m_revision;
+    std::vector<aditof::FrameDetails> m_rgbdFrameTypes;
+    float m_Rw;
+    float m_Gw;
+    float m_Bw;
 };
 
 #endif // CAMERA_3D_SMART_H

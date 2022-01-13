@@ -36,6 +36,7 @@
 
 #include <ros/ros.h>
 
+std::mutex mtx_dynamic_rec;
 using namespace aditof;
 
 std::string parseArgs(int argc, char **argv) {
@@ -101,6 +102,15 @@ void setFrameType(const std::shared_ptr<aditof::Camera> &camera,
     status = camera->setFrameType(type);
     if (status != Status::OK) {
         LOG(ERROR) << "Could not set camera frame type!";
+        return;
+    }
+}
+
+void getAvailableFrameType(const std::shared_ptr<aditof::Camera> &camera,
+                           std::vector<std::string> &availableFrameTypes) {
+    camera->getAvailableFrameTypes(availableFrameTypes);
+    if (availableFrameTypes.empty()) {
+        LOG(ERROR) << "No frame type available!";
         return;
     }
 }
@@ -172,9 +182,14 @@ void disableNoiseReduction(const std::shared_ptr<Camera> &camera) {
 
 void getNewFrame(const std::shared_ptr<Camera> &camera, aditof::Frame *frame) {
     Status status = Status::OK;
-    status = camera->requestFrame(frame);
-    if (status != Status::OK) {
-        LOG(ERROR) << "Could not request frame!";
+
+    try {
+        std::lock_guard<std::mutex> lck(mtx_dynamic_rec);
+        status = camera->requestFrame(frame);
+        if (status != Status::OK) {
+            LOG(ERROR) << "Could not request frame!";
+        }
+    } catch (std::exception &e) {
     }
 }
 
@@ -231,5 +246,17 @@ void irTo16bitGrayscale(uint16_t *frameData, int width, int height) {
             norm_val * std::numeric_limits<unsigned short int>::max() +
             (1.0f - norm_val) * minColorValue;
         frameData[i] = static_cast<uint16_t>(grayscale_val);
+    }
+}
+
+void rgbFrameEnhancement(uint16_t *frame, int width, int height) {
+    int max = -1;
+    for (int i = 0; i < height * width; i++) {
+        if (max < frame[i])
+            max = frame[i];
+    }
+    int correctionRatio = (int)(0xffff) / max;
+    for (int i = 0; i < height * width; i++) {
+        frame[i] = frame[i] * correctionRatio;
     }
 }

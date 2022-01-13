@@ -527,14 +527,14 @@ aditof::Status UsbDepthSensor::getAvailableFrameTypes(
     details.height = aditof::USB_FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height; //TODO
-    details.type = "depth_only";
+    details.type = "depth";
     types.push_back(details);
 
     details.width = aditof::USB_FRAME_WIDTH;
     details.height = aditof::USB_FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height; //TODO
-    details.type = "ir_only";
+    details.type = "ir";
     types.push_back(details);
 
     // TO DO: Should get these details from the hardware/firmware
@@ -823,4 +823,10 @@ aditof::Status UsbDepthSensor::getHandle(void **handle) {
         LOG(ERROR) << "Won't return the handle. Device hasn't been opened yet.";
         return aditof::Status::UNAVAILABLE;
     }
+}
+
+aditof::Status UsbDepthSensor::getName(std::string &sensorName) const {
+    sensorName = m_sensorName;
+
+    return aditof::Status::OK;
 }

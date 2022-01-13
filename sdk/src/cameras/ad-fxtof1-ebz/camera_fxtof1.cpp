@@ -59,18 +59,23 @@ static const std::map<std::string, std::array<rangeStruct, 3>>
 
 static const std::string skCustomMode = "custom";
 static const std::vector<std::string> availableControls = {
-    "noise_reduction_threshold", "ir_gamma_correction", "depth_correction",
-    "camera_geometry_correction"};
+    "noise_reduction_threshold",
+    "ir_gamma_correction",
+    "depth_correction",
+    "camera_geometry_correction",
+    "camera_distortion_correction",
+    "ir_distortion_correction",
+    "revision"};
 static const std::string skEepromName = "custom";
 CameraFxTof1::CameraFxTof1(
     std::shared_ptr<aditof::DepthSensorInterface> depthSensor,
     std::vector<std::shared_ptr<aditof::StorageInterface>> &eeproms,
     std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>> &tSensors)
-    : m_depthSensor(depthSensor), m_devStarted(false),
+    : m_depthSensor(depthSensor), m_devStarted(false), m_devProgrammed(false),
       m_eepromInitialized(false), m_tempSensorsInitialized(false),
       m_availableControls(availableControls), m_depthCorrection(true),
-      m_cameraGeometryCorrection(true), m_revision("RevA"),
-      m_devProgrammed(false) {
+      m_cameraGeometryCorrection(true), m_distortionCorrection(true),
+      m_irDistorsionCorrection(false), m_revision("RevA") {
 
     // Check Depth Sensor
     if (!depthSensor) {
@@ -170,6 +175,19 @@ aditof::Status CameraFxTof1::initialize() {
 
     m_tempSensorsInitialized = true;
 
+    // Read the camera's serial number from eeprom
+    uint8_t eepromSerial[EEPROM_SERIAL_LENGHT];
+    status =
+        m_eeprom->read(EEPROM_SERIAL_ADDR, eepromSerial, EEPROM_SERIAL_LENGHT);
+    if (status != Status::OK) {
+        LOG(ERROR) << "Failed to read serial from eeprom";
+        return status;
+    }
+
+    m_details.cameraId =
+        std::string((char *)(eepromSerial), EEPROM_SERIAL_LENGHT);
+    LOG(INFO) << "Camera ID: " << m_details.cameraId;
+
     status = m_calibration.readCalMap(m_eeprom);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to read calibration data from eeprom";
@@ -251,21 +269,25 @@ aditof::Status CameraFxTof1::setMode(const std::string &mode,
     // must be done here after programming the camera in order for them to
     // work properly. Setting the mode of the camera, programming it
     // with a different firmware would reset the value in the 0xc3da register
-    if (m_details.frameType.type == "depth_only") {
+    if (m_details.frameType.type == "depth") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
         uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
         m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
-    } else if (m_details.frameType.type == "ir_only") {
+    } else if (m_details.frameType.type == "ir") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
         uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x05, 0x0007, 0x0004};
         m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
     } else if (m_details.frameType.type == "depth_ir") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
+#if defined(JETSON)
+        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
+#else
         uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x07, 0x0007, 0x0004};
+#endif
         m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
     }
 
-    m_details.depthParameters.depthGain = 1.0f;
+    m_details.depthParameters.depthGain = (mode == "near" ? 0.5 : 1.15);
     m_details.depthParameters.depthOffset = 0.0f;
 
     m_details.mode = mode;
@@ -390,7 +412,7 @@ aditof::Status CameraFxTof1::requestFrame(aditof::Frame *frame,
 
     if (m_details.mode != skCustomMode &&
         (m_details.frameType.type == "depth_ir" ||
-         m_details.frameType.type == "depth_only")) {
+         m_details.frameType.type == "depth")) {
 
         if (m_depthCorrection) {
             m_calibration.calibrateDepth(frameDataLocation,
@@ -402,6 +424,22 @@ aditof::Status CameraFxTof1::requestFrame(aditof::Frame *frame,
                 frameDataLocation,
                 m_details.frameType.width * m_details.frameType.height);
         }
+        if (m_distortionCorrection) {
+            m_calibration.distortionCorrection(frameDataLocation,
+                                               m_details.frameType.width,
+                                               m_details.frameType.height);
+        }
+    }
+
+    if ((m_details.frameType.type == "depth_ir" ||
+         m_details.frameType.type == "ir") &&
+        m_irDistorsionCorrection) {
+        uint16_t *irDataLocation;
+        frame->getData(FrameDataType::IR, &irDataLocation);
+
+        m_calibration.distortionCorrection(irDataLocation,
+                                           m_details.frameType.width,
+                                           m_details.frameType.height);
     }
     return Status::OK;
 }
@@ -476,6 +514,18 @@ aditof::Status CameraFxTof1::setControl(const std::string &control,
         m_cameraGeometryCorrection = std::stoi(value) != 0;
     }
 
+    if (control == "camera_distortion_correction") {
+        m_distortionCorrection = std::stoi(value) != 0;
+    }
+
+    if (control == "ir_distortion_correction") {
+        m_irDistorsionCorrection = std::stoi(value) != 0;
+    }
+
+    if (control == "revision") {
+        m_revision = value;
+    }
+
     return status;
 }
 
@@ -505,6 +555,18 @@ aditof::Status CameraFxTof1::getControl(const std::string &control,
 
     if (control == "camera_geometry_correction") {
         value = m_cameraGeometryCorrection ? "1" : "0";
+    }
+
+    if (control == "camera_distortion_correction") {
+        value = m_distortionCorrection ? "1" : "0";
+    }
+
+    if (control == "ir_distorsion_correction") {
+        value = m_irDistorsionCorrection ? "1" : "0";
+    }
+
+    if (control == "revision") {
+        value = m_revision;
     }
 
     return status;

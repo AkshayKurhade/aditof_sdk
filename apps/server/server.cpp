@@ -35,7 +35,6 @@
 #include "aditof/sensor_enumerator_interface.h"
 #include "buffer.pb.h"
 
-#include "../../sdk/src/connections/target/v4l_buffer_access_interface.h"
 #include "../../sdk/src/connections/utils/connection_validator.h"
 
 #include <csignal>
@@ -56,10 +55,9 @@ static std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>>
     temperatureSensors;
 bool sensors_are_created = false;
 
-/* Server only works with one depth sensor */
-std::shared_ptr<aditof::DepthSensorInterface> camDepthSensor;
-std::shared_ptr<aditof::V4lBufferAccessInterface> sensorV4lBufAccess;
-unsigned long long depthSensorTimestamp;
+std::vector<std::shared_ptr<aditof::DepthSensorInterface>> camDepthSensor;
+aditof::FrameDetails frameDetailsCache[2];
+std::vector<uint16_t *> sensorsFrameBuffers;
 
 static payload::ClientRequest buff_recv;
 static payload::ServerResponse buff_send;
@@ -94,8 +92,16 @@ static void cleanup_sensors() {
         sensor->close();
     }
     temperatureSensors.clear();
-    sensorV4lBufAccess.reset();
-    camDepthSensor.reset();
+    for (auto &depthSensor : camDepthSensor) {
+        depthSensor.reset();
+    }
+    camDepthSensor.clear();
+    for (size_t i = 0; i < sensorsFrameBuffers.size(); ++i) {
+        if (sensorsFrameBuffers[i]) {
+            delete[] sensorsFrameBuffers[i];
+        }
+    }
+    sensorsFrameBuffers.clear();
 
     sensors_are_created = false;
 }
@@ -240,6 +246,8 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigint_handler);
 
+    LOG(INFO) << "Server built with websockets version:" << LWS_LIBRARY_VERSION;
+
     struct lws_context_creation_info info;
     memset(&info, 0, sizeof(info));
 
@@ -253,6 +261,13 @@ int main(int argc, char *argv[]) {
     network->context = lws_create_context(&info);
 
     Initialize();
+    int msTimeout;
+// TO DO: After 6-12 months we should remove this #if-else and keep only things related to 3.2.3
+#if LWS_LIBRARY_VERSION_NUMBER > 3002003
+    msTimeout = 0;
+#else
+    msTimeout = 50;
+#endif
 
 #if 0
   /* Note: Simply enabling this won't work, need libwebsocket compiled differently to demonize this */
@@ -263,7 +278,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     while (!interrupted) {
-        lws_service(network->context, 50 /* timeout_ms */);
+        lws_service(network->context, msTimeout /* timeout_ms */);
     }
 
     if (sensors_are_created) {
@@ -304,6 +319,12 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
             sensorsEnumerator->getStorages(storages);
             sensorsEnumerator->getTemperatureSensors(temperatureSensors);
             sensors_are_created = true;
+
+            // Create buffers to be used by depth sensors when reuqesting frame from them
+            sensorsFrameBuffers.resize(depthSensors.size());
+            for (size_t i = 0; i < sensorsFrameBuffers.size(); ++i) {
+                sensorsFrameBuffers[i] = nullptr;
+            }
         }
 
         /* Add information about available sensors */
@@ -314,13 +335,18 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
             buff_send.set_status(::payload::Status::UNREACHABLE);
             break;
         }
-        camDepthSensor = depthSensors.front();
-        aditof::SensorDetails depthSensorDetails;
-        camDepthSensor->getDetails(depthSensorDetails);
+
         auto pbSensorsInfo = buff_send.mutable_sensors_info();
-        sensorV4lBufAccess =
-            std::dynamic_pointer_cast<aditof::V4lBufferAccessInterface>(
-                camDepthSensor);
+        int depth_sensor_id = 0;
+        for (const auto &depthSensor : depthSensors) {
+            camDepthSensor.emplace_back(depthSensor);
+            std::string name;
+            depthSensor->getName(name);
+            auto pbImagerInfo = pbSensorsInfo->add_image_sensors();
+            pbImagerInfo->set_name(name);
+            pbImagerInfo->set_id(depth_sensor_id);
+            ++depth_sensor_id;
+        }
 
         // Storages
         int storage_id = 0;
@@ -343,36 +369,38 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
             pbTempSensorInfo->set_id(temp_sensor_id);
             ++temp_sensor_id;
         }
-
         buff_send.set_status(
             static_cast<::payload::Status>(aditof::Status::OK));
         break;
     }
 
     case OPEN: {
-        aditof::Status status = camDepthSensor->open();
+        int index = buff_recv.sensors_info().image_sensors(0).id();
+        aditof::Status status = camDepthSensor[index]->open();
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
     }
 
     case START: {
-        aditof::Status status = camDepthSensor->start();
+        int index = buff_recv.sensors_info().image_sensors(0).id();
+        aditof::Status status = camDepthSensor[index]->start();
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
     }
 
     case STOP: {
-        aditof::Status status = camDepthSensor->stop();
+        int index = buff_recv.sensors_info().image_sensors(0).id();
+        aditof::Status status = camDepthSensor[index]->stop();
         buff_send.set_status(static_cast<::payload::Status>(status));
-
         break;
     }
 
     case GET_AVAILABLE_FRAME_TYPES: {
         std::vector<aditof::FrameDetails> frameDetails;
-
+        int index = buff_recv.sensors_info().image_sensors(0).id();
         aditof::Status status =
-            camDepthSensor->getAvailableFrameTypes(frameDetails);
+            camDepthSensor[index]->getAvailableFrameTypes(frameDetails);
+
         for (auto detail : frameDetails) {
             auto type = buff_send.add_available_frame_types();
             type->set_width(detail.width);
@@ -380,6 +408,8 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
             type->set_type(detail.type);
             type->set_full_data_width(detail.fullDataWidth);
             type->set_full_data_height(detail.fullDataHeight);
+            type->set_rgb_width(detail.rgbWidth);
+            type->set_rgb_height(detail.rgbHeight);
         }
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
@@ -387,12 +417,27 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
 
     case SET_FRAME_TYPE: {
         aditof::FrameDetails details;
+        int index = buff_recv.sensors_info().image_sensors(0).id();
+        aditof::Status status;
+
         details.width = buff_recv.frame_type().width();
         details.height = buff_recv.frame_type().height();
         details.type = buff_recv.frame_type().type();
         details.fullDataWidth = buff_recv.frame_type().full_data_width();
         details.fullDataHeight = buff_recv.frame_type().full_data_height();
-        aditof::Status status = camDepthSensor->setFrameType(details);
+        details.rgbWidth = buff_recv.frame_type().rgb_width();
+        details.rgbHeight = buff_recv.frame_type().rgb_height();
+        status = camDepthSensor[index]->setFrameType(details);
+        frameDetailsCache[index] = details;
+
+        if (sensorsFrameBuffers[index]) {
+            delete[] sensorsFrameBuffers[index];
+        }
+
+        sensorsFrameBuffers[index] =
+            new uint16_t[details.fullDataWidth * details.fullDataHeight +
+                         details.rgbWidth * details.rgbHeight];
+
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
     }
@@ -401,55 +446,36 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         size_t programSize = static_cast<size_t>(buff_recv.func_int32_param(0));
         const uint8_t *pdata = reinterpret_cast<const uint8_t *>(
             buff_recv.func_bytes_param(0).c_str());
-        aditof::Status status = camDepthSensor->program(pdata, programSize);
+        aditof::Status status = camDepthSensor[0]->program(pdata, programSize);
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
     }
 
     case GET_FRAME: {
-        aditof::Status status = sensorV4lBufAccess->waitForBuffer();
+        int index = buff_recv.sensors_info().image_sensors(0).id();
+        aditof::BufferInfo bufferInfo;
+        aditof::Status status = camDepthSensor[index]->getFrame(
+            sensorsFrameBuffers[index], &bufferInfo);
         if (status != aditof::Status::OK) {
-            buff_send.set_status(static_cast<::payload::Status>(status));
-            break;
-        }
-
-        struct v4l2_buffer buf;
-
-        status = sensorV4lBufAccess->dequeueInternalBuffer(buf);
-        if (status != aditof::Status::OK) {
-            buff_send.set_status(static_cast<::payload::Status>(status));
-            break;
-        }
-
-        unsigned int buf_data_len;
-        uint8_t *buffer;
-
-        status =
-            sensorV4lBufAccess->getInternalBuffer(&buffer, buf_data_len, buf);
-        if (status != aditof::Status::OK) {
+            buff_send.set_message("Failed to get frame");
             buff_send.set_status(static_cast<::payload::Status>(status));
             break;
         }
 
 #ifdef JETSON
-        buff_send.add_int32_payload(0);
-        buff_send.add_bytes_payload(buffer,
-                                    buf_data_len * sizeof(uint16_t) / 3);
+        buff_send.add_bytes_payload(
+            sensorsFrameBuffers[index],
+            (frameDetailsCache[index].fullDataWidth *
+                 frameDetailsCache[index].fullDataHeight +
+             frameDetailsCache[index].rgbWidth *
+                 frameDetailsCache[index].rgbHeight) *
+                sizeof(uint16_t));
 #else
-        buff_send.add_int32_payload(1);
-        buff_send.add_bytes_payload(buffer, buf_data_len * sizeof(uint8_t));
+        buff_send.add_bytes_payload(
+            sensorsFrameBuffers[index],
+            frameDetailsCache[index].fullDataWidth *
+                frameDetailsCache[index].fullDataHeight * sizeof(uint16_t));
 #endif
-
-        auto bufDetails = buff_send.mutable_buffer_details();
-        bufDetails->set_timestamp(buf.timestamp.tv_sec * 1000000 +
-                                  buf.timestamp.tv_usec);
-
-        status = sensorV4lBufAccess->enqueueInternalBuffer(buf);
-        if (status != aditof::Status::OK) {
-            buff_send.set_status(static_cast<::payload::Status>(status));
-            break;
-        }
-
         buff_send.set_status(payload::Status::OK);
         break;
     }
@@ -460,7 +486,7 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
             buff_recv.func_bytes_param(0).c_str());
         uint16_t *data = new uint16_t[length];
         aditof::Status status =
-            camDepthSensor->readAfeRegisters(address, data, length);
+            camDepthSensor[0]->readAfeRegisters(address, data, length);
         if (status == aditof::Status::OK) {
             buff_send.add_bytes_payload(data, length * sizeof(uint16_t));
         }
@@ -476,7 +502,7 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         const uint16_t *data = reinterpret_cast<const uint16_t *>(
             buff_recv.func_bytes_param(1).c_str());
         aditof::Status status =
-            camDepthSensor->writeAfeRegisters(address, data, length);
+            camDepthSensor[0]->writeAfeRegisters(address, data, length);
         buff_send.set_status(static_cast<::payload::Status>(status));
         break;
     }
@@ -493,7 +519,7 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         }
 
         void *sensorHandle;
-        status = camDepthSensor->getHandle(&sensorHandle);
+        status = camDepthSensor[0]->getHandle(&sensorHandle);
         if (status != aditof::Status::OK) {
             buff_send.set_message("Failed to obtain handle from depth sensor "
                                   "needed to open storage");
@@ -578,7 +604,7 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         }
 
         void *sensorHandle;
-        aditof::Status status = camDepthSensor->getHandle(&sensorHandle);
+        aditof::Status status = camDepthSensor[0]->getHandle(&sensorHandle);
         if (status != aditof::Status::OK) {
             buff_send.set_message("Failed to obtain handle from depth sensor "
                                   "needed to open temperature sensor");
@@ -643,6 +669,42 @@ void invoke_sdk_api(payload::ClientRequest buff_recv) {
         break;
     }
 
+    case GET_CAMERA_TYPE: {
+        auto sensorsEnumerator =
+            aditof::SensorEnumeratorFactory::buildTargetSensorEnumerator();
+        if (!sensorsEnumerator) {
+            std::string errMsg = "Failed to create a target sensor enumerator";
+            LOG(WARNING) << errMsg;
+            buff_send.set_message(errMsg);
+            buff_send.set_status(
+                static_cast<::payload::Status>(aditof::Status::UNAVAILABLE));
+            break;
+        }
+
+        aditof::CameraType tofCameraType;
+        aditof::Status status =
+            sensorsEnumerator->getCameraTypeOnTarget(tofCameraType);
+        ::payload::CameraType msgCameraType;
+        if (status == aditof::Status::OK) {
+            switch (tofCameraType) {
+            case aditof::CameraType::AD_96TOF1_EBZ:
+                msgCameraType = ::payload::CameraType::AD_96TOF1_EBZ;
+                break;
+            case aditof::CameraType::AD_FXTOF1_EBZ:
+                msgCameraType = ::payload::CameraType::AD_FXTOF1_EBZ;
+                break;
+            case aditof::CameraType::SMART_3D_CAMERA:
+                msgCameraType = ::payload::CameraType::SMART_3D_CAMERA;
+                break;
+            }
+            buff_send.set_camera_type(msgCameraType);
+        }
+
+        buff_send.set_status(
+            static_cast<::payload::Status>(aditof::Status::OK));
+        break;
+    }
+
     default: {
         std::string msgErr = "Function not found";
         std::cout << msgErr << "\n";
@@ -676,4 +738,5 @@ void Initialize() {
     s_map_api_Values["TemperatureSensorClose"] = TEMPERATURE_SENSOR_CLOSE;
     s_map_api_Values["HangUp"] = HANG_UP;
     s_map_api_Values["GetVersionString"] = GET_CONNECTION_STRING;
+    s_map_api_Values["GetCameraType"] = GET_CAMERA_TYPE;
 }

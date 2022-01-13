@@ -88,14 +88,6 @@ aditof::Status FrameImpl::setDetails(const aditof::FrameDetails &details) {
     }
 
     m_details = details;
-
-    //TO DO: change the typecheck in case we have diferent combinations of depth/ir/rgb
-
-    if (m_details.type != "depth_ir_rgb") {
-        m_details.rgbWidth = 0;
-        m_details.rgbHeight = 0;
-    }
-
     allocFrameData(m_details);
 
     return status;
@@ -140,9 +132,13 @@ aditof::Status FrameImpl::getData(aditof::FrameDataType dataType,
 
 void FrameImpl::allocFrameData(const aditof::FrameDetails &details) {
 
-    m_fullData = new uint16_t[details.width * details.height * 2 +
+    m_fullData = new uint16_t[details.fullDataWidth * details.fullDataHeight +
                               details.rgbWidth * details.rgbHeight];
     m_depthData = m_fullData;
-    m_irData = m_fullData + (details.width * details.height);
-    m_rgbData = m_fullData + (details.width * details.height * 2);
+    if (details.fullDataHeight == details.height)
+        m_irData = m_depthData;
+    else
+        m_irData = m_fullData + (details.width * details.height);
+
+    m_rgbData = m_fullData + (details.fullDataWidth * details.fullDataHeight);
 }

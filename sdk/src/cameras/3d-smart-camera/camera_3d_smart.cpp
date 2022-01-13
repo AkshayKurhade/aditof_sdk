@@ -36,9 +36,12 @@
 #include <aditof/frame.h>
 #include <aditof/frame_operations.h>
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <glog/logging.h>
 #include <map>
+#include <math.h>
 
 static const std::string skCameraName = "3D-Smart-Camera";
 
@@ -56,34 +59,34 @@ static const std::map<std::string, std::array<rangeStruct, 3>>
 static const std::string skCustomMode = "custom";
 
 static const std::vector<std::string> availableControls = {
-    "noise_reduction_threshold", "ir_gamma_correction", "depth_correction",
-    "camera_geometry_correction"};
 
+    "noise_reduction_threshold", "ir_gamma_correction",
+    "depth_correction",          "camera_geometry_correction",
+    "bayer_rgb_conversion",      "camera_distortion_correction",
+    "ir_distortion_correction",  "revision"};
+//one sensor constructor
 Camera3D_Smart::Camera3D_Smart(
-    std::shared_ptr<aditof::DepthSensorInterface> depthSensor,
-    std::shared_ptr<aditof::DepthSensorInterface> rgbSensor,
+    std::shared_ptr<aditof::DepthSensorInterface> rgbdSensor,
     std::vector<std::shared_ptr<aditof::StorageInterface>> &eeproms,
     std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>> &tSensors)
-    : m_depthSensor(depthSensor), m_rgbSensor(rgbSensor), m_devStarted(false),
+    : m_rgbdSensor(rgbdSensor), m_devStarted(false), m_devProgrammed(false),
       m_eepromInitialized(false), m_tempSensorsInitialized(false),
       m_availableControls(availableControls), m_depthCorrection(true),
-      m_cameraGeometryCorrection(true), m_revision("RevA"),
-      m_devProgrammed(false) {
+      m_cameraGeometryCorrection(true), m_cameraDistortionCorrection(true),
+      m_irDistorsionCorrection(false), m_revision("RevA") {
+
+    m_Rw = 255.0 * 0.25;
+    m_Gw = 255.0 * 0.35;
+    m_Bw = 255.0 * 0.25;
 
     // Check Depth Sensor
-    if (!depthSensor) {
+    if (!rgbdSensor) {
         LOG(WARNING) << "Invalid instance of a depth sensor";
         return;
     }
     aditof::SensorDetails sDetails;
-    m_depthSensor->getDetails(sDetails);
+    m_rgbdSensor->getDetails(sDetails);
     m_details.connection = sDetails.connectionType;
-
-    // Check RGB Sensor
-    if (!rgbSensor) {
-        LOG(WARNING) << "Invalid instance of a RGB sensor";
-        return;
-    }
 
     // Look for EEPROM
     auto eeprom_iter =
@@ -120,6 +123,7 @@ Camera3D_Smart::Camera3D_Smart(
 }
 
 Camera3D_Smart::~Camera3D_Smart() {
+
     if (m_eepromInitialized) {
         m_eeprom->close();
     }
@@ -134,33 +138,27 @@ aditof::Status Camera3D_Smart::initialize() {
 
     LOG(INFO) << "Initializing camera";
 
-    if (!m_depthSensor || !m_rgbSensor || !m_eeprom || !m_temperatureSensor) {
+    if (!m_rgbdSensor || !m_eeprom || !m_temperatureSensor) {
+
         LOG(WARNING) << "Failed to initialize! Not all sensors are available";
         return Status::GENERIC_ERROR;
     }
 
     // Open communication with the depth sensor
-    status = m_depthSensor->open();
+    status = m_rgbdSensor->open();
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to open device";
         return status;
     }
 
     void *handle;
-    status = m_depthSensor->getHandle(&handle);
+    status = m_rgbdSensor->getHandle(&handle);
     if (status != Status::OK) {
         LOG(ERROR) << "Failed to obtain the handle";
         return status;
     }
 
     m_details.bitCount = 12;
-
-    // Open communication with the RGB sensor
-    status = m_rgbSensor->open();
-    if (status != Status::OK) {
-        LOG(WARNING) << "Failed to open device";
-        return status;
-    }
 
     // Open communication with EEPROM
     status = m_eeprom->open(handle);
@@ -182,13 +180,24 @@ aditof::Status Camera3D_Smart::initialize() {
     }
     m_tempSensorsInitialized = true;
 
+    // Read the camera's serial number from eeprom
+    uint8_t eepromSerial[EEPROM_SERIAL_LENGHT];
+    status =
+        m_eeprom->read(EEPROM_SERIAL_ADDR, eepromSerial, EEPROM_SERIAL_LENGHT);
+    if (status != Status::OK) {
+        LOG(ERROR) << "Failed to read serial from eeprom";
+        return status;
+    }
+
+    m_details.cameraId =
+        std::string((char *)(eepromSerial), EEPROM_SERIAL_LENGHT);
+    LOG(INFO) << "Camera ID: " << m_details.cameraId;
+
     status = m_calibration.readCalMap(m_eeprom);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to read calibration data from eeprom";
         return status;
     }
-
-    LOG(INFO) << "Camera initialized";
 
     m_calibration.getIntrinsic(INTRINSIC, m_details.intrinsics.cameraMatrix);
     m_calibration.getIntrinsic(DISTORTION_COEFFICIENTS,
@@ -197,43 +206,40 @@ aditof::Status Camera3D_Smart::initialize() {
     // For now we use the unit cell size values specified in the datasheet
     m_details.intrinsics.pixelWidth = 0.0056;
     m_details.intrinsics.pixelHeight = 0.0056;
+
+    // Cache the frame types provided by Depth and RGB sensors
+    status = m_rgbdSensor->getAvailableFrameTypes(m_rgbdFrameTypes);
+    if (status != Status::OK) {
+        LOG(WARNING) << "Failed to get the depth sensor frame types";
+        return status;
+    }
+
+    LOG(INFO) << "Camera initialized";
+
     return Status::OK;
 }
 
 aditof::Status Camera3D_Smart::start() {
     aditof::Status status;
 
-    status = m_depthSensor->start();
+    status = m_rgbdSensor->start();
     if (status != aditof::Status::OK) {
-        LOG(ERROR) << "Failed to start the depth sensor";
+        LOG(ERROR) << "Failed to start the rgbd sensor";
         return status;
     }
     m_devStarted = true;
-
-    status = m_rgbSensor->start();
-    if (status != aditof::Status::OK) {
-        LOG(ERROR) << "Failed to start the RGB sensor";
-        return status;
-    }
-
     return aditof::Status::OK;
 }
 
 aditof::Status Camera3D_Smart::stop() {
     aditof::Status status;
 
-    status = m_depthSensor->stop();
+    status = m_rgbdSensor->stop();
     if (status != aditof::Status::OK) {
-        LOG(ERROR) << "Failed to stop the depth sensor";
+        LOG(ERROR) << "Failed to stop the rgbd sensor";
         return status;
     }
     m_devStarted = false;
-
-    status = m_rgbSensor->stop();
-    if (status != aditof::Status::OK) {
-        LOG(ERROR) << "Failed to stop the RGB sensor";
-        return status;
-    }
 
     return aditof::Status::OK;
 }
@@ -276,8 +282,8 @@ aditof::Status Camera3D_Smart::setMode(const std::string &mode,
 
         LOG(INFO) << "Firmware size: " << firmwareData.size() * sizeof(uint16_t)
                   << " bytes";
-        status = m_depthSensor->program((uint8_t *)firmwareData.data(),
-                                        2 * firmwareData.size());
+        status = m_rgbdSensor->program((uint8_t *)firmwareData.data(),
+                                       2 * firmwareData.size());
         if (status != Status::OK) {
             LOG(WARNING) << "Failed to program AFE";
             return Status::UNREACHABLE;
@@ -286,7 +292,7 @@ aditof::Status Camera3D_Smart::setMode(const std::string &mode,
     }
 
     status = m_calibration.setMode(
-        m_depthSensor, mode, m_details.depthParameters.maxDepth,
+        m_rgbdSensor, mode, m_details.depthParameters.maxDepth,
         m_details.frameType.width, m_details.frameType.height);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to set calibration mode";
@@ -297,21 +303,22 @@ aditof::Status Camera3D_Smart::setMode(const std::string &mode,
     // must be done here after programming the camera in order for them to
     // work properly. Setting the mode of the camera, programming it
     // with a different firmware would reset the value in the 0xc3da register
-    if (m_details.frameType.type == "depth_only") {
+    if (m_details.frameType.type == "depth_rgb") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
         uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
-    } else if (m_details.frameType.type == "ir_only") {
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+    } else if (m_details.frameType.type == "ir_rgb") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
         uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x05, 0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
-    } else if (m_details.frameType.type == "depth_ir") {
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+    } else if (m_details.frameType.type == "depth_ir_rgb") {
         uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
-        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x07, 0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
+
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
     }
 
-    m_details.depthParameters.depthGain = 1.0f;
+    m_details.depthParameters.depthGain = (mode == "near" ? 0.5 : 1.15);
     m_details.depthParameters.depthOffset = 0.0f;
 
     m_details.mode = mode;
@@ -336,7 +343,7 @@ aditof::Status Camera3D_Smart::setFrameType(const std::string &frameType) {
     Status status = Status::OK;
 
     if (m_devStarted) {
-        status = m_depthSensor->stop();
+        status = m_rgbdSensor->stop();
         if (status != Status::OK) {
             return status;
         }
@@ -344,7 +351,7 @@ aditof::Status Camera3D_Smart::setFrameType(const std::string &frameType) {
     }
 
     std::vector<FrameDetails> detailsList;
-    status = m_depthSensor->getAvailableFrameTypes(detailsList);
+    status = m_rgbdSensor->getAvailableFrameTypes(detailsList);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to get available frame types";
         return status;
@@ -361,24 +368,34 @@ aditof::Status Camera3D_Smart::setFrameType(const std::string &frameType) {
     }
 
     if (m_details.frameType != *frameDetailsIt) {
+
         //Turn off the streaming of data to modify parameters in the driver.
         uint16_t afeRegsAddr[2] = {0x4001, 0x7c22};
         uint16_t afeRegsVal[2] = {0x0006, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 2);
-        status = m_depthSensor->setFrameType(*frameDetailsIt);
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 2);
+
+        status = m_rgbdSensor->setFrameType(*frameDetailsIt);
+
         if (status != Status::OK) {
-            LOG(WARNING) << "Failed to set frame type";
+            LOG(WARNING) << "Failed to set frame type of the depth sensor";
             return status;
         }
-        m_details.frameType = *frameDetailsIt;
+        m_details.frameType.type = frameType;
+        m_details.frameType.width = frameDetailsIt->width;
+        m_details.frameType.height = frameDetailsIt->height;
+        m_details.frameType.rgbWidth = frameDetailsIt->rgbWidth;
+        m_details.frameType.rgbHeight = frameDetailsIt->rgbHeight;
+        m_details.frameType.fullDataWidth = frameDetailsIt->fullDataWidth;
+        m_details.frameType.fullDataHeight = frameDetailsIt->fullDataHeight;
+
         //Turn on the streaming of data.
         uint16_t afeRegsAddress[2] = {0x4001, 0x7c22};
         uint16_t afeRegsValue[2] = {0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddress, afeRegsValue, 2);
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddress, afeRegsValue, 2);
     }
 
     if (!m_devStarted) {
-        status = m_depthSensor->start();
+        status = m_rgbdSensor->start();
         if (status != Status::OK) {
             return status;
         }
@@ -393,8 +410,9 @@ aditof::Status Camera3D_Smart::getAvailableFrameTypes(
     using namespace aditof;
     Status status = Status::OK;
 
+    availableFrameTypes.clear();
     std::vector<FrameDetails> frameDetailsList;
-    status = m_depthSensor->getAvailableFrameTypes(frameDetailsList);
+    status = m_rgbdSensor->getAvailableFrameTypes(frameDetailsList);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to get available frame types";
         return status;
@@ -421,49 +439,69 @@ Camera3D_Smart::requestFrame(aditof::Frame *frame,
     FrameDetails frameDetails;
     frame->getDetails(frameDetails);
 
-    if (m_details.frameType != frameDetails) {
+    if (m_details.frameType.type != frameDetails.type) {
         frame->setDetails(m_details.frameType);
     }
 
-    // Get the frame from the Depth sensor
-    uint16_t *depthIrDataLocation;
-    frame->getData(FrameDataType::FULL_DATA, &depthIrDataLocation);
+    uint16_t *fullDataLocation;
+    frame->getData(FrameDataType::FULL_DATA, &fullDataLocation);
 
-    aditof::BufferInfo bufferInfo;
-    status = m_depthSensor->getFrame(depthIrDataLocation, &bufferInfo);
+    aditof::BufferInfo rgbdBufferInfo;
+    status = m_rgbdSensor->getFrame(fullDataLocation, &rgbdBufferInfo);
     if (status != Status::OK) {
         LOG(WARNING) << "Failed to get frame from depth sensor";
         return status;
     }
 
-    // Get the frame from the RGB sensor
-    uint16_t *rgbDataLocation;
-    frame->getData(FrameDataType::RGB, &rgbDataLocation);
+#ifdef BAYER_CONVERSION
+    //conversion for bayer to rgb
+    uint16_t *copyOfRgbData =
+        (uint16_t *)malloc(m_details.frameType.rgbWidth *
+                           m_details.frameType.rgbHeight * sizeof(uint16_t));
 
-    status = m_depthSensor->getFrame(rgbDataLocation);
-    if (status != Status::OK) {
-        LOG(WARNING) << "Failed to get frame from RGB sensor";
-        return status;
+    std::memcpy(copyOfRgbData, rgbDataLocation,
+                m_details.frameType.rgbWidth * m_details.frameType.rgbHeight *
+                    2);
+
+    bayer2RGB(rgbDataLocation, (uint8_t *)copyOfRgbData,
+              m_details.frameType.rgbWidth, m_details.frameType.rgbHeight);
+    free(copyOfRgbData);
+}
+#endif
+
+if (m_details.mode != skCustomMode &&
+    (m_details.frameType.type == "depth_ir_rgb" ||
+     m_details.frameType.type == "depth_rgb")) {
+
+    uint16_t *depthDataLocation;
+    frame->getData(FrameDataType::DEPTH, &depthDataLocation);
+
+    uint16_t *irDataLocation;
+    frame->getData(FrameDataType::IR, &irDataLocation);
+
+    if (m_depthCorrection) {
+        m_calibration.calibrateDepth(depthDataLocation,
+                                     m_details.frameType.width *
+                                         m_details.frameType.height);
     }
-
-    // TO DO: Synchronize the two sensors
-
-    if (m_details.mode != skCustomMode &&
-        (m_details.frameType.type == "depth_ir" ||
-         m_details.frameType.type == "depth_only")) {
-        if (m_depthCorrection) {
-            m_calibration.calibrateDepth(frameDataLocation,
-                                         m_details.frameType.width *
-                                             m_details.frameType.height);
-        }
-        if (m_cameraGeometryCorrection) {
-            m_calibration.calibrateCameraGeometry(
-                frameDataLocation,
-                m_details.frameType.width * m_details.frameType.height);
-        }
+    if (m_cameraGeometryCorrection) {
+        m_calibration.calibrateCameraGeometry(depthDataLocation,
+                                              m_details.frameType.width *
+                                                  m_details.frameType.height);
     }
+    if (m_cameraDistortionCorrection) {
+        m_calibration.distortionCorrection(depthDataLocation,
+                                           m_details.frameType.width,
+                                           m_details.frameType.height);
+    }
+    if (m_irDistorsionCorrection) {
+        m_calibration.distortionCorrection(irDataLocation,
+                                           m_details.frameType.width,
+                                           m_details.frameType.height);
+    }
+}
 
-    return Status::OK;
+return Status::OK;
 }
 
 aditof::Status
@@ -479,8 +517,7 @@ Camera3D_Smart::getDetails(aditof::CameraDetails &details) const {
 aditof::Status Camera3D_Smart::getImageSensors(
     std::vector<std::shared_ptr<aditof::DepthSensorInterface>> &sensors) {
     sensors.clear();
-    sensors.emplace_back(m_depthSensor);
-    sensors.emplace_back(m_rgbSensor);
+    sensors.emplace_back(m_rgbdSensor);
 
     return aditof::Status::OK;
 }
@@ -539,6 +576,19 @@ aditof::Status Camera3D_Smart::setControl(const std::string &control,
         m_cameraGeometryCorrection = std::stoi(value) != 0;
     }
 
+    if (control == "bayer_rgb_conversion") {
+        m_cameraBayerRgbConversion = std::stoi(value) != 0;
+    }
+
+    if (control == "revision") {
+        m_revision = value;
+    }
+    if (control == "camera_distortion_correction") {
+        m_cameraDistortionCorrection = std::stoi(value) != 0;
+    }
+    if (control == "ir_distortion_correction") {
+        m_irDistorsionCorrection = std::stoi(value) != 0;
+    }
     return status;
 }
 
@@ -570,6 +620,21 @@ aditof::Status Camera3D_Smart::getControl(const std::string &control,
         value = m_cameraGeometryCorrection ? "1" : "0";
     }
 
+    if (control == "bayer_rgb_conversion") {
+        value = m_cameraBayerRgbConversion ? "1" : "0";
+    }
+    if (control == "revision") {
+        value = m_revision;
+    }
+
+    if (control == "camera_distortion_correction") {
+        value = m_cameraDistortionCorrection ? "1" : "0";
+    }
+
+    if (control == "ir_distorsion_correction") {
+        value = m_irDistorsionCorrection ? "1" : "0";
+    }
+
     return status;
 }
 
@@ -588,7 +653,7 @@ aditof::Status Camera3D_Smart::setNoiseReductionTreshold(uint16_t treshold) {
     afeRegsVal[2] |= treshold;
     m_noiseReductionThreshold = treshold;
 
-    return m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+    return m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
 }
 
 aditof::Status Camera3D_Smart::setIrGammaCorrection(float gamma) {
@@ -609,12 +674,12 @@ aditof::Status Camera3D_Smart::setIrGammaCorrection(float gamma) {
                              y_val[3], y_val[4], y_val[5], y_val[6],
                              y_val[7], y_val[8], 0x0007,   0x0004};
 
-    status = m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 8);
+    status = m_rgbdSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 8);
     if (status != Status::OK) {
         return status;
     }
     status =
-        m_depthSensor->writeAfeRegisters(afeRegsAddr + 8, afeRegsVal + 8, 8);
+        m_rgbdSensor->writeAfeRegisters(afeRegsAddr + 8, afeRegsVal + 8, 8);
     if (status != Status::OK) {
         return status;
     }
@@ -623,3 +688,141 @@ aditof::Status Camera3D_Smart::setIrGammaCorrection(float gamma) {
 
     return status;
 }
+
+#ifdef BAYER_CONVERSION
+float Camera3D_Smart::getValueFromData(uint8_t *pData, int x, int y, int width,
+                                       int height) {
+    return (float)((pData[x * width * 2 + y * 2 + 1] << 8) +
+                   pData[x * width * 2 + y * 2]) /
+           4095.0 * 255.0;
+}
+
+float Camera3D_Smart::verticalKernel(uint8_t *pData, int x, int y, int width,
+                                     int height) {
+    float sum = 0;
+    int nr = 0;
+    if ((x - 1) >= 0 && (x - 1) < height) {
+        sum += getValueFromData(pData, x - 1, y, width, height);
+        nr++;
+    }
+    if ((x + 1) >= 0 && (x + 1) < height) {
+        sum += getValueFromData(pData, x + 1, y, width, height);
+        nr++;
+    }
+    return (sum / (float)(nr > 0 ? nr : 1));
+}
+float Camera3D_Smart::horizontalKernel(uint8_t *pData, int x, int y, int width,
+                                       int height) {
+    float sum = 0;
+    int nr = 0;
+    if ((y - 1) >= 0 && (y - 1) < width) {
+        sum += getValueFromData(pData, x, y - 1, width, height);
+        nr++;
+    }
+    if ((y + 1) >= 0 && (y + 1) < width) {
+        sum += getValueFromData(pData, x, y + 1, width, height);
+        nr++;
+    }
+    return ((float)sum / (float)(nr > 0 ? nr : 1));
+}
+float Camera3D_Smart::plusKernel(uint8_t *pData, int x, int y, int width,
+                                 int height) {
+    float sum = 0;
+    int nr = 0;
+    if ((x - 1) >= 0 && (x - 1) < height) {
+        sum += getValueFromData(pData, x - 1, y, width, height);
+        nr++;
+    }
+    if ((x + 1) >= 0 && (x + 1) < height) {
+        sum += getValueFromData(pData, x + 1, y, width, height);
+        nr++;
+    }
+    if ((y - 1) >= 0 && (y - 1) < width) {
+        sum += getValueFromData(pData, x, y - 1, width, height);
+        nr++;
+    }
+    if ((y + 1) >= 0 && (y + 1) < width) {
+        sum += getValueFromData(pData, x, y + 1, width, height);
+        nr++;
+    }
+    return (sum / (float)(nr > 0 ? nr : 1));
+}
+float Camera3D_Smart::crossKernel(uint8_t *pData, int x, int y, int width,
+                                  int height) {
+    float sum = 0;
+    int nr = 0;
+    if ((x - 1) >= 0 && (x - 1) < height && (y - 1) >= 0 && (y - 1) < width) {
+        sum += getValueFromData(pData, x - 1, y - 1, width, height);
+        nr++;
+    }
+    if ((x + 1) >= 0 && (x + 1) < height && (y - 1) >= 0 && (y - 1) < width) {
+        sum += getValueFromData(pData, x + 1, y - 1, width, height);
+        nr++;
+    }
+    if ((x - 1) >= 0 && (x - 1) < height && (y + 1) >= 0 && (y + 1) < width) {
+        sum += getValueFromData(pData, x - 1, y + 1, width, height);
+        nr++;
+    }
+    if ((x + 1) >= 0 && (x + 1) < height && (y + 1) >= 0 && (y + 1) < width) {
+        sum += getValueFromData(pData, x + 1, y + 1, width, height);
+        nr++;
+    }
+    return (sum / (float)(nr > 0 ? nr : 1));
+}
+
+float Camera3D_Smart::directCopy(uint8_t *pData, int x, int y, int width,
+                                 int height) {
+    return (float)getValueFromData(pData, x, y, width, height); //
+}
+
+void Camera3D_Smart::bayer2RGB(uint16_t *buffer, uint8_t *pData, int width,
+                               int height) {
+    //casting into 8 in order to work with it
+    uint8_t *rgb = (uint8_t *)buffer;
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            if (i % 2 == RED_START_POZ_Y &&
+                j % 2 == RED_START_POZ_X) //red square
+            {
+                rgb[(i * width + j) * 3 + RED] =
+                    (uint8_t)(directCopy(pData, i, j, width, height) * 255.0 /
+                              this->m_Rw);
+                rgb[(i * width + j) * 3 + GREEN] = (uint8_t)(
+                    plusKernel(pData, i, j, width, height) * 255.0 / m_Gw);
+                rgb[(i * width + j) * 3 + BLUE] = (uint8_t)(
+                    crossKernel(pData, i, j, width, height) * 255.0 / m_Bw);
+            } else if (i % 2 == (RED_START_POZ_Y ^ 1) &&
+                       j % 2 == (RED_START_POZ_X ^ 1)) //blue square
+            {
+                rgb[(i * width + j) * 3 + RED] = (uint8_t)(
+                    crossKernel(pData, i, j, width, height) * 255.0 / m_Rw);
+                rgb[(i * width + j) * 3 + GREEN] = (uint8_t)(
+                    plusKernel(pData, i, j, width, height) * 255.0 / m_Gw);
+                rgb[(i * width + j) * 3 + BLUE] = (uint8_t)(
+                    directCopy(pData, i, j, width, height) * 255.0 / m_Bw);
+            } else if (i % 2 == (RED_START_POZ_Y ^ 1) &&
+                       j % 2 == RED_START_POZ_X) //green pixel, blue row
+            {
+                rgb[(i * width + j) * 3 + RED] = (uint8_t)(
+                    verticalKernel(pData, i, j, width, height) * 255.0 / m_Rw);
+                rgb[(i * width + j) * 3 + GREEN] = (uint8_t)(
+                    directCopy(pData, i, j, width, height) * 255.0 / m_Gw);
+                rgb[(i * width + j) * 3 + BLUE] =
+                    (uint8_t)(horizontalKernel(pData, i, j, width, height) *
+                              255.0 / m_Bw);
+            } else if (i % 2 == RED_START_POZ_Y &&
+                       j % 2 == (RED_START_POZ_X ^ 1)) // green pixel, red row
+            {
+                rgb[(i * width + j) * 3 + RED] =
+                    (uint8_t)(horizontalKernel(pData, i, j, width, height) *
+                              255.0 / m_Rw);
+                rgb[(i * width + j) * 3 + GREEN] = (uint8_t)(
+                    directCopy(pData, i, j, width, height) * 255.0 / m_Gw);
+                rgb[(i * width + j) * 3 + BLUE] = (uint8_t)(
+                    verticalKernel(pData, i, j, width, height) * 255.0 / m_Bw);
+            }
+        }
+    }
+}
+#endif

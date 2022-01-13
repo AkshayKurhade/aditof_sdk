@@ -65,6 +65,8 @@ PYBIND11_MODULE(aditofpython, m) {
         .def_readwrite("height", &aditof::FrameDetails::height)
         .def_readwrite("fullDataWidth", &aditof::FrameDetails::fullDataWidth)
         .def_readwrite("fullDataHeight", &aditof::FrameDetails::fullDataHeight)
+        .def_readwrite("rgbWidth", &aditof::FrameDetails::rgbWidth)
+        .def_readwrite("rgbHeight", &aditof::FrameDetails::rgbHeight)
         .def_readwrite("type", &aditof::FrameDetails::type);
 
     // Camera declarations
@@ -111,11 +113,19 @@ PYBIND11_MODULE(aditofpython, m) {
     py::class_<frameData>(m, "frameData", py::buffer_protocol())
         .def(py::init<>())
         .def_buffer([](const frameData &f) -> py::buffer_info {
-            return py::buffer_info(
-                f.pData, sizeof(uint16_t),
-                py::format_descriptor<uint16_t>::format(), 2,
-                {f.details.height, f.details.width},
-                {sizeof(uint16_t) * f.details.width, sizeof(uint16_t)});
+            if (f.details.type.find("rgb") != std::string::npos)
+                return py::buffer_info(
+                    f.pData, sizeof(uint16_t),
+                    py::format_descriptor<uint16_t>::format(), 2,
+                    {f.details.height + f.details.rgbHeight,
+                     f.details.width + f.details.rgbWidth},
+                    {sizeof(uint16_t) * f.details.width, sizeof(uint16_t)});
+            else
+                return py::buffer_info(
+                    f.pData, sizeof(uint16_t),
+                    py::format_descriptor<uint16_t>::format(), 2,
+                    {f.details.height, f.details.width},
+                    {sizeof(uint16_t) * f.details.width, sizeof(uint16_t)});
         });
 
     // ADI Time of Flight API

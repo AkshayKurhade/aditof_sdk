@@ -97,21 +97,25 @@ Addi9036Sensor::Addi9036Sensor(const std::string &driverPath,
                                const std::string &driverSubPath,
                                const std::string &captureDev)
     : m_driverPath(driverPath), m_driverSubPath(driverSubPath),
-      m_captureDev(captureDev), m_implData(new Addi9036Sensor::ImplData) {}
+      m_captureDev(captureDev), m_implData(new Addi9036Sensor::ImplData) {
+    m_sensorName = "addi9036";
+}
 
 Addi9036Sensor::~Addi9036Sensor() {
     struct VideoDev *dev;
 
     for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
         dev = &m_implData->videoDevs[i];
-        if (dev->started) {
+        if (dev && dev->started) {
             stop();
         }
     }
 
     for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
         dev = &m_implData->videoDevs[i];
-
+        if (!dev) {
+            continue;
+        }
         for (unsigned int i = 0; i < dev->nVideoBuffers; i++) {
             if (munmap(dev->videoBuffers[i].start,
                        dev->videoBuffers[i].length) == -1) {
@@ -120,16 +124,20 @@ Addi9036Sensor::~Addi9036Sensor() {
                     << "errno: " << errno << " error: " << strerror(errno);
             }
         }
-        free(dev->videoBuffers);
+        if (dev) {
+            free(dev->videoBuffers);
 
-        if (close(dev->fd) == -1) {
-            LOG(WARNING) << "close m_implData->fd error "
-                         << "errno: " << errno << " error: " << strerror(errno);
-        }
+            if (close(dev->fd) == -1) {
+                LOG(WARNING)
+                    << "close m_implData->fd error "
+                    << "errno: " << errno << " error: " << strerror(errno);
+            }
 
-        if (close(dev->sfd) == -1) {
-            LOG(WARNING) << "close m_implData->sfd error "
-                         << "errno: " << errno << " error: " << strerror(errno);
+            if (close(dev->sfd) == -1) {
+                LOG(WARNING)
+                    << "close m_implData->sfd error "
+                    << "errno: " << errno << " error: " << strerror(errno);
+            }
         }
     }
 }
@@ -317,12 +325,12 @@ aditof::Status Addi9036Sensor::getAvailableFrameTypes(
     Status status = Status::OK;
 
     FrameDetails details;
+    memset(&details, 0, sizeof(FrameDetails));
 
     details.width = aditof::FRAME_WIDTH;
     details.height = aditof::FRAME_HEIGHT;
     details.fullDataWidth = details.width;
-    details.fullDataHeight =
-        details.height * ((m_implData->numVideoDevs == 2) ? 1 : 2);
+    details.fullDataHeight = details.height * 2;
     details.type = "depth_ir";
     types.push_back(details);
 
@@ -330,14 +338,14 @@ aditof::Status Addi9036Sensor::getAvailableFrameTypes(
     details.height = aditof::FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height;
-    details.type = "depth_only";
+    details.type = "depth";
     types.push_back(details);
 
     details.width = aditof::FRAME_WIDTH;
     details.height = aditof::FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height;
-    details.type = "ir_only";
+    details.type = "ir";
     types.push_back(details);
 
     return status;
@@ -391,8 +399,11 @@ Addi9036Sensor::setFrameType(const aditof::FrameDetails &details) {
         fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_SBGGR12;
 #endif
         fmt.fmt.pix.width = details.fullDataWidth;
+#if defined JETSON
+        fmt.fmt.pix.height = details.height;
+#else
         fmt.fmt.pix.height = details.fullDataHeight;
-
+#endif
         if (xioctl(dev->fd, VIDIOC_S_FMT, &fmt) == -1) {
             LOG(WARNING) << "Setting Pixel Format error, errno: " << errno
                          << " error: " << strerror(errno);
@@ -401,7 +412,7 @@ Addi9036Sensor::setFrameType(const aditof::FrameDetails &details) {
 
         /* Allocate the video buffers in the driver */
         CLEAR(req);
-        req.count = 4;
+        req.count = 2;
         req.type = dev->videoBuffersType;
         req.memory = V4L2_MEMORY_MMAP;
 
@@ -545,92 +556,123 @@ aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer,
     struct VideoDev *dev;
     Status status;
 
-    if (buffer == nullptr) {
-        LOG(ERROR) << "Received buffer null pointer";
-        return Status::INVALID_ARGUMENT;
-    }
-
-    for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
-        dev = &m_implData->videoDevs[i];
-        status = waitForBufferPrivate(dev);
-        if (status != Status::OK) {
-            return status;
+#if defined(JETSON)
+    uint8_t dataType = 0;
+    uint8_t cnt = m_implData->frameDetails.type == "depth_ir" ? 2 : 1;
+    for (uint8_t idx = 0; idx < cnt; idx++) {
+#endif
+        if (buffer == nullptr) {
+            LOG(ERROR) << "Received buffer null pointer";
+            return Status::INVALID_ARGUMENT;
         }
 
-        status = dequeueInternalBufferPrivate(buf[i], dev);
-        if (status != Status::OK) {
-            return status;
+#if defined(JETSON)
+        if (m_implData->frameDetails.type == "depth_ir") {
+            const uint16_t address[] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
+            const uint16_t data[2][5] = {
+                {0x0006, 0x0004, 0x05, 0x0007, 0x0004},
+                {0x0006, 0x0004, 0x03, 0x0007, 0x0004}};
+            writeAfeRegisters(address, data[dataType],
+                              sizeof(address) / sizeof(address[0]));
+            dataType = !dataType;
         }
-    }
+#endif
 
-    unsigned int width;
-    unsigned int height;
-    unsigned int buf_data_len;
-    uint8_t *pdata[m_implData->numVideoDevs];
-
-    width = m_implData->frameDetails.width;
-    height = m_implData->frameDetails.height;
-
-    for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
-        dev = &m_implData->videoDevs[i];
-        status = getInternalBufferPrivate(&pdata[i], buf_data_len, buf[i], dev);
-        if (status != Status::OK) {
-            return status;
-        }
-    }
-
-    auto isBufferPacked = [](const struct v4l2_buffer &buf, unsigned int width,
-                             unsigned int height) {
-        unsigned int bytesused = 0;
-        if (buf.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-            bytesused = buf.m.planes[0].bytesused;
-        } else {
-            bytesused = buf.bytesused;
-        }
-
-        return bytesused == (width * height * 3);
-    };
-
-    if (width == 668) {
-        unsigned int j = 0;
-        for (unsigned int i = 0; i < (buf_data_len); i += 3) {
-            if ((i != 0) && (i % (336 * 3) == 0)) {
-                j -= 4;
+        for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
+            dev = &m_implData->videoDevs[i];
+            status = waitForBufferPrivate(dev);
+            if (status != Status::OK) {
+                return status;
             }
 
-            buffer[j] = (((unsigned short)*(pdata[0] + i)) << 4) |
-                        (((unsigned short)*(pdata[0] + i + 2)) & 0x000F);
-            j++;
-
-            buffer[j] = (((unsigned short)*(pdata[0] + i + 1)) << 4) |
-                        ((((unsigned short)*(pdata[0] + i + 2)) & 0x00F0) >> 4);
-            j++;
+            status = dequeueInternalBufferPrivate(buf[i], dev);
+            if (status != Status::OK) {
+                return status;
+            }
         }
-    } else if (!isBufferPacked(buf[0], width, height)) {
-        // TODO: investigate optimizations for this (arm neon / 1024 bytes
-        // chunks)
-        if (m_implData->frameDetails.type == "depth_only") {
-            memcpy(buffer, pdata[0], buf[0].bytesused);
-        } else if (m_implData->frameDetails.type == "ir_only") {
 
+        unsigned int width;
+        unsigned int height;
+        unsigned int buf_data_len;
+        uint8_t *pdata[m_implData->numVideoDevs];
+
+        width = m_implData->frameDetails.width;
+        height = m_implData->frameDetails.height;
+
+        for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
+            dev = &m_implData->videoDevs[i];
+            status =
+                getInternalBufferPrivate(&pdata[i], buf_data_len, buf[i], dev);
+            if (status != Status::OK) {
+                return status;
+            }
+        }
+
+        auto isBufferPacked = [](const struct v4l2_buffer &buf,
+                                 unsigned int width, unsigned int height) {
+            unsigned int bytesused = 0;
+            if (buf.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+                bytesused = buf.m.planes[0].bytesused;
+            } else {
+                bytesused = buf.bytesused;
+            }
+
+            return bytesused == (width * height * 3);
+        };
+
+        if (width == 668) {
+            unsigned int j = 0;
+            for (unsigned int i = 0; i < (buf_data_len); i += 3) {
+                if ((i != 0) && (i % (336 * 3) == 0)) {
+                    j -= 4;
+                }
+
+                buffer[j] = (((unsigned short)*(pdata[0] + i)) << 4) |
+                            (((unsigned short)*(pdata[0] + i + 2)) & 0x000F);
+                j++;
+
+                buffer[j] =
+                    (((unsigned short)*(pdata[0] + i + 1)) << 4) |
+                    ((((unsigned short)*(pdata[0] + i + 2)) & 0x00F0) >> 4);
+                j++;
+            }
+        } else if (!isBufferPacked(buf[0], width, height)) {
+            // TODO: investigate optimizations for this (arm neon / 1024 bytes
+            // chunks)
+            if (m_implData->frameDetails.type == "depth") {
+                memcpy(buffer, pdata[0], buf[0].bytesused);
+            } else if (m_implData->frameDetails.type == "ir") {
+#if defined(JETSON)
+                memcpy(buffer, pdata[0], buf[0].bytesused);
+#else
             memcpy(buffer + (width * height), pdata[0], buf[0].bytesused);
-        } else {
-#ifdef TOYBRICK
-            unsigned int fullDataWidth = m_implData->frameDetails.fullDataWidth;
-            unsigned int fullDataHeight =
-                m_implData->frameDetails.fullDataHeight;
-            uint32_t j = 0, j1 = width * height;
-            for (uint32_t i = 0; i < fullDataHeight; i += 2) {
-                memcpy(buffer + j, pdata[0] + i * width * 2, width * 2);
-                j += width;
-                memcpy(buffer + j1, pdata[0] + (i + 1) * width * 2, width * 2);
-                j1 += width;
-            }
-            for (uint32_t i = 0; i < fullDataWidth * fullDataHeight; i += 2) {
-                buffer[i] =
-                    ((buffer[i] & 0x00FF) << 4) | ((buffer[i]) & 0xF000) >> 12;
-                buffer[i + 1] = ((buffer[i + 1] & 0x00FF) << 4) |
-                                ((buffer[i + 1]) & 0xF000) >> 12;
+#endif
+            } else {
+#if defined(TOYBRICK)
+                unsigned int fullDataWidth =
+                    m_implData->frameDetails.fullDataWidth;
+                unsigned int fullDataHeight =
+                    m_implData->frameDetails.fullDataHeight;
+                uint32_t j = 0, j1 = width * height;
+                for (uint32_t i = 0; i < fullDataHeight; i += 2) {
+                    memcpy(buffer + j, pdata[0] + i * width * 2, width * 2);
+                    j += width;
+                    memcpy(buffer + j1, pdata[0] + (i + 1) * width * 2,
+                           width * 2);
+                    j1 += width;
+                }
+                for (uint32_t i = 0; i < fullDataWidth * fullDataHeight;
+                     i += 2) {
+                    buffer[i] = ((buffer[i] & 0x00FF) << 4) |
+                                ((buffer[i]) & 0xF000) >> 12;
+                    buffer[i + 1] = ((buffer[i + 1] & 0x00FF) << 4) |
+                                    ((buffer[i + 1]) & 0xF000) >> 12;
+                }
+#elif defined(JETSON)
+            if (dataType) {
+                memcpy(buffer, pdata[0], buf[0].bytesused);
+            } else {
+                memcpy(buffer + (width * height), pdata[0], buf[0].bytesused);
             }
 #else
             // Not Packed and type == "depth_ir"
@@ -648,18 +690,23 @@ aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer,
                 ptr_buff_ir[k + 1] = (*(ptr_ir + k + 1) >> 4);
             }
 #endif
-        }
+            }
 
-    } else {
-        // clang-format off
+        } else {
+            // clang-format off
         uint16_t *depthPtr = buffer;
         uint16_t *irPtr = buffer + (width * height);
         unsigned int j = 0;
 
-        if (m_implData->frameDetails.type == "depth_only" ||
-                m_implData->frameDetails.type == "ir_only") {
+        if (m_implData->frameDetails.type == "depth" ||
+                m_implData->frameDetails.type == "ir") {
                 buf_data_len /= 2;
         }
+
+        if(m_implData->frameDetails.type == "ir"){
+            irPtr = buffer;
+        }
+        
         /* The frame is read from the device as an array of uint8_t's where
          * every 3 uint8_t's can produce 2 uint16_t's that have only 12 bits
          * in use.
@@ -693,10 +740,10 @@ aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer,
             toStore.val[0] = aBuffer;
             toStore.val[1] = bBuffer;
 
-            if (m_implData->frameDetails.type == "depth_only") {
+            if (m_implData->frameDetails.type == "depth") {
                 vst2q_u16(depthPtr, toStore);
                 depthPtr += 16;
-            } else if (m_implData->frameDetails.type == "ir_only") {
+            } else if (m_implData->frameDetails.type == "ir") {
                 vst2q_u16(irPtr, toStore);
                 irPtr += 16;
             } else {
@@ -712,19 +759,26 @@ aditof::Status Addi9036Sensor::getFrame(uint16_t *buffer,
             j += 16;
             pdata[0] += 24;
         }
-        // clang-format on
-    }
+            // clang-format on
+        }
 
-    for (unsigned int i = 0; i < m_implData->numVideoDevs; i++) {
-        dev = &m_implData->videoDevs[i];
-        status = enqueueInternalBufferPrivate(buf[i], dev);
-        if (status != Status::OK) {
-            return status;
+        for (uint8_t i = 0; i < m_implData->numVideoDevs; i++) {
+            dev = &m_implData->videoDevs[i];
+            status = enqueueInternalBufferPrivate(buf[i], dev);
+            if (status != Status::OK) {
+                return status;
+            }
+        }
+
+        bufferInfo->timestamp =
+            buf[0].timestamp.tv_sec * 1000000 + buf[0].timestamp.tv_usec;
+
+#if defined(JETSON)
+        if (m_implData->frameDetails.type == "depth_ir") {
+            usleep(45000);
         }
     }
-
-    bufferInfo->timestamp =
-        buf[0].timestamp.tv_sec * 1000000 + buf[0].timestamp.tv_usec;
+#endif
 
     return status;
 }
@@ -833,6 +887,12 @@ Addi9036Sensor::getDetails(aditof::SensorDetails &details) const {
 
 aditof::Status Addi9036Sensor::getHandle(void **handle) {
     *handle = nullptr;
+    return aditof::Status::OK;
+}
+
+aditof::Status Addi9036Sensor::getName(std::string &sensorName) const {
+    sensorName = m_sensorName;
+
     return aditof::Status::OK;
 }
 

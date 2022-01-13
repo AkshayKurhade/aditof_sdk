@@ -38,7 +38,13 @@
 
 class NetworkDepthSensor : public aditof::DepthSensorInterface {
   public:
-    NetworkDepthSensor(const std::string &ip);
+    /* Call when you want the comunication object to be constructed */
+    explicit NetworkDepthSensor(const std::string &name, int id,
+                                const std::string &ip);
+
+    /* Call when you want to use an already constructed comunication object */
+    explicit NetworkDepthSensor(const std::string &name, int id, void *handle);
+
     ~NetworkDepthSensor();
 
   public: // implements DepthSensorInterface
@@ -62,10 +68,13 @@ class NetworkDepthSensor : public aditof::DepthSensorInterface {
     virtual aditof::Status
     getDetails(aditof::SensorDetails &details) const override;
     virtual aditof::Status getHandle(void **handle) override;
+    virtual aditof::Status getName(std::string &sensorName) const override;
 
   private:
     struct ImplData;
 
+    std::string m_sensorName;
+    int m_id;
     aditof::SensorDetails m_sensorDetails;
     aditof::BufferInfo m_bufferInfo;
     std::unique_ptr<ImplData> m_implData;

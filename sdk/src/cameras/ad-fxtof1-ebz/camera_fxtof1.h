@@ -99,6 +99,8 @@ class CameraFxTof1 : public aditof::Camera {
     float m_irGammaCorrection;
     bool m_depthCorrection;
     bool m_cameraGeometryCorrection;
+    bool m_distortionCorrection;
+    bool m_irDistorsionCorrection;
     std::string m_revision;
 };
 

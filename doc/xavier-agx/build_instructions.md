@@ -9,7 +9,7 @@ To build the SDK and run the included applications and example code the followin
  - libopencv-dev
  - cmake
  - glog v0.3.5
- - libwebsockets v3.1
+ - libwebsockets v3.2.3
  - protocol buffers v3.9.0
 
 The SD card image already contains all the SDK dependencies and there's no need to install them again. To update and build the SDK just follow the steps below.
@@ -17,6 +17,7 @@ The SD card image already contains all the SDK dependencies and there's no need 
 ### AD-96TOF1-EBZ
 
 ```console
+analog@xavier:~/workspace/aditof_sdk$ git checkout master
 analog@xavier:~/workspace/aditof_sdk$ git pull
 analog@xavier:~/workspace/aditof_sdk$ cd build
 analog@xavier:~/workspace/aditof_sdk/build$ cmake -DXAVIER=1 ..
@@ -26,6 +27,7 @@ analog@xavier:~/workspace/aditof_sdk/build$ make -j4
 ### AD-FXTOF1-EBZ
 
 ```console
+analog@xavier:~/workspace/aditof_sdk$ git checkout master
 analog@xavier:~/workspace/aditof_sdk$ git pull
 analog@xavier:~/workspace/aditof_sdk$ cd build
 analog@xavier:~/workspace/aditof_sdk/build$ cmake -DXAVIER=1 -DUSE_FXTOF1=1 ..

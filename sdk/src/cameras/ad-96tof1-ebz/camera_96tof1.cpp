@@ -60,8 +60,13 @@ static const std::map<std::string, std::array<rangeStruct, 3>>
 static const std::string skCustomMode = "custom";
 
 static const std::vector<std::string> availableControls = {
-    "noise_reduction_threshold", "ir_gamma_correction", "depth_correction",
-    "camera_geometry_correction", "revision"};
+    "noise_reduction_threshold",
+    "ir_gamma_correction",
+    "depth_correction",
+    "camera_geometry_correction",
+    "camera_distortion_correction",
+    "ir_distortion_correction",
+    "revision"};
 
 Camera96Tof1::Camera96Tof1(
     std::shared_ptr<aditof::DepthSensorInterface> depthSensor,
@@ -70,7 +75,8 @@ Camera96Tof1::Camera96Tof1(
     : m_depthSensor(depthSensor), m_devStarted(false),
       m_eepromInitialized(false), m_tempSensorsInitialized(false),
       m_availableControls(availableControls), m_depthCorrection(true),
-      m_cameraGeometryCorrection(true), m_revision("RevC") {
+      m_cameraGeometryCorrection(true), m_distortionCorrection(true),
+      m_irDistorsionCorrection(false), m_revision("RevC") {
 
     // Check Depth Sensor
     if (!depthSensor) {
@@ -212,13 +218,15 @@ aditof::Status Camera96Tof1::initialize() {
 }
 
 aditof::Status Camera96Tof1::start() {
-    // return m_depthSensor->start(); // For now we keep the device open all the time
-    return aditof::Status::OK;
+    m_devStarted = true;
+    return m_depthSensor
+        ->start(); // For now we keep the device open all the time
 }
 
 aditof::Status Camera96Tof1::stop() {
-    // return m_depthSensor->stop(); // For now we keep the device open all the time
-    return aditof::Status::OK;
+    m_devStarted = false;
+    return m_depthSensor
+        ->stop(); // For now we keep the device open all the time
 }
 
 aditof::Status Camera96Tof1::setMode(const std::string &mode,
@@ -313,26 +321,36 @@ aditof::Status Camera96Tof1::setMode(const std::string &mode,
             return status;
         }
     }
+    if (m_frameTypeCache != m_details.frameType.type) {
 #if defined XAVIER || defined XAVIERNX
-    // Register set for VC ID. Set Depth on VC=0 and IR on VC=1
-    uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3dc, 0x4001, 0x7c22};
-    uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0xe4, 0x0007, 0x0004};
-    m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        // Register set for VC ID. Set Depth on VC=0 and IR on VC=1
+        uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3dc, 0x4001, 0x7c22};
+        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0xe4, 0x0007, 0x0004};
+        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
 #endif
-    // register writes for enabling only one video stream (depth/ ir)
-    // must be done here after programming the camera in order for them to
-    // work properly. Setting the mode of the camera, programming it
-    // with a different firmware would reset the value in the oxc3da register
-    if (m_details.frameType.type == "depth_only") {
-        uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
-        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
-    } else if (m_details.frameType.type == "ir_only") {
-        uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
-        uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x05, 0x0007, 0x0004};
-        m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        // register writes for enabling only one video stream (depth/ ir)
+        // must be done here after programming the camera in order for them to
+        // work properly. Setting the mode of the camera, programming it
+        // with a different firmware would reset the value in the oxc3da register
+        if (m_details.frameType.type == "depth") {
+            uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
+            uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
+            m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        } else if (m_details.frameType.type == "ir") {
+            uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
+            uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x05, 0x0007, 0x0004};
+            m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        } else if (m_details.frameType.type == "depth_ir") {
+            uint16_t afeRegsAddr[5] = {0x4001, 0x7c22, 0xc3da, 0x4001, 0x7c22};
+#if defined(JETSON)
+            uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x03, 0x0007, 0x0004};
+#else
+            uint16_t afeRegsVal[5] = {0x0006, 0x0004, 0x07, 0x0007, 0x0004};
+#endif
+            m_depthSensor->writeAfeRegisters(afeRegsAddr, afeRegsVal, 5);
+        }
+        m_frameTypeCache = m_details.frameType.type;
     }
-
     m_details.mode = mode;
 
     return status;
@@ -358,6 +376,14 @@ aditof::Status Camera96Tof1::getAvailableModes(
 aditof::Status Camera96Tof1::setFrameType(const std::string &frameType) {
     using namespace aditof;
     Status status = Status::OK;
+
+    if (m_devStarted) {
+        status = m_depthSensor->stop();
+        if (status != Status::OK) {
+            return status;
+        }
+        m_devStarted = false;
+    }
 
     std::vector<FrameDetails> detailsList;
     status = m_depthSensor->getAvailableFrameTypes(detailsList);
@@ -444,7 +470,7 @@ aditof::Status Camera96Tof1::requestFrame(aditof::Frame *frame,
 
     if (m_details.mode != skCustomMode &&
         (m_details.frameType.type == "depth_ir" ||
-         m_details.frameType.type == "depth_only")) {
+         m_details.frameType.type == "depth")) {
         if (m_depthCorrection) {
             m_calibration.calibrateDepth(frameDataLocation,
                                          m_details.frameType.width *
@@ -455,6 +481,20 @@ aditof::Status Camera96Tof1::requestFrame(aditof::Frame *frame,
                 frameDataLocation,
                 m_details.frameType.width * m_details.frameType.height);
         }
+        if (m_distortionCorrection) {
+            m_calibration.distortionCorrection(frameDataLocation,
+                                               m_details.frameType.width,
+                                               m_details.frameType.height);
+        }
+    }
+    if ((m_details.frameType.type == "depth_ir" ||
+         m_details.frameType.type == "ir") &&
+        m_irDistorsionCorrection) {
+        uint16_t *irDataLocation;
+        frame->getData(FrameDataType::IR, &irDataLocation);
+        m_calibration.distortionCorrection(irDataLocation,
+                                           m_details.frameType.width,
+                                           m_details.frameType.height);
     }
 
     return Status::OK;
@@ -533,8 +573,16 @@ aditof::Status Camera96Tof1::setControl(const std::string &control,
         m_cameraGeometryCorrection = std::stoi(value) != 0;
     }
 
+    if (control == "camera_distortion_correction") {
+        m_distortionCorrection = std::stoi(value) != 0;
+    }
+
     if (control == "revision") {
         m_revision = value;
+    }
+
+    if (control == "ir_distorsion_correction") {
+        m_irDistorsionCorrection = std::stoi(value) != 0;
     }
 
     return status;
@@ -566,6 +614,14 @@ aditof::Status Camera96Tof1::getControl(const std::string &control,
 
     if (control == "camera_geometry_correction") {
         value = m_cameraGeometryCorrection ? "1" : "0";
+    }
+
+    if (control == "camera_distortion_correction") {
+        value = m_distortionCorrection ? "1" : "0";
+    }
+
+    if (control == "ir_distortion_correction") {
+        value = m_irDistorsionCorrection ? "1" : "0";
     }
 
     if (control == "revision") {

@@ -45,8 +45,8 @@ NetworkSensorEnumerator::NetworkSensorEnumerator(const std::string &ip)
 
 NetworkSensorEnumerator::~NetworkSensorEnumerator() = default;
 
-aditof::Status getVersionString(std::unique_ptr<Network> &net,
-                                std::string &connectionString) {
+Status getVersionString(std::unique_ptr<Network> &net,
+                        std::string &connectionString) {
 
     net->send_buff.set_func_name("GetVersionString");
     net->send_buff.set_expect_reply(true);
@@ -76,6 +76,49 @@ aditof::Status getVersionString(std::unique_ptr<Network> &net,
     return status;
 }
 
+Status getCameraType(std::unique_ptr<Network> &net, CameraType &cameraType) {
+
+    net->send_buff.set_func_name("GetCameraType");
+    net->send_buff.set_expect_reply(true);
+
+    if (net->SendCommand() != 0) {
+        LOG(WARNING) << "Send Command Failed";
+        return Status::INVALID_ARGUMENT;
+    }
+
+    if (net->recv_server_data() != 0) {
+        LOG(WARNING) << "Receive Data Failed";
+        return Status::GENERIC_ERROR;
+    }
+
+    if (net->recv_buff.server_status() !=
+        payload::ServerStatus::REQUEST_ACCEPTED) {
+        LOG(WARNING) << "API execution on Target Failed";
+        return Status::GENERIC_ERROR;
+    }
+
+    Status status = static_cast<Status>(net->recv_buff.status());
+
+    if (status == Status::OK) {
+        switch (net->recv_buff.camera_type()) {
+        case payload::CameraType::AD_96TOF1_EBZ:
+            cameraType = aditof::CameraType::AD_96TOF1_EBZ;
+            break;
+        case payload::CameraType::AD_FXTOF1_EBZ:
+            cameraType = aditof::CameraType::AD_FXTOF1_EBZ;
+            break;
+        case payload::CameraType::SMART_3D_CAMERA:
+            cameraType = aditof::CameraType::SMART_3D_CAMERA;
+            break;
+        default:
+            LOG(ERROR) << "Invalid camera type received from server";
+            break;
+        }
+    }
+
+    return status;
+}
+
 Status NetworkSensorEnumerator::searchSensors() {
     Status status = Status::OK;
 
@@ -94,6 +137,13 @@ Status NetworkSensorEnumerator::searchSensors() {
     if (!isValidConnection(aditof::ConnectionType::NETWORK, connectionString)) {
         LOG(ERROR) << "invalid connection string: " << connectionString;
         return Status::GENERIC_ERROR;
+    }
+
+    status = getCameraType(net, m_cameraType);
+    if (status != Status::OK) {
+        LOG(WARNING) << "Failed to find out the camera type on target. "
+                        "Assumming it's camera: AD-96TOF1-EBZ";
+        m_cameraType = CameraType::AD_96TOF1_EBZ;
     }
 
     net->send_buff.set_func_name("FindSensors");
@@ -117,6 +167,13 @@ Status NetworkSensorEnumerator::searchSensors() {
 
     const payload::ServerResponse &msg = net->recv_buff;
     const payload::SensorsInfo &pbSensorsInfo = msg.sensors_info();
+
+    for (int i = 0; i < pbSensorsInfo.image_sensors().size(); ++i) {
+        std::string name = pbSensorsInfo.image_sensors(i).name();
+        unsigned int id = pbSensorsInfo.image_sensors(i).id();
+        m_imageSensorsInfo.emplace_back(
+            std::pair<std::string, unsigned int>(name, id));
+    }
 
     for (int i = 0; i < pbSensorsInfo.storages().size(); ++i) {
         std::string name = pbSensorsInfo.storages(i).name();
@@ -142,8 +199,26 @@ Status NetworkSensorEnumerator::getDepthSensors(
 
     depthSensors.clear();
 
-    auto sensor = std::make_shared<NetworkDepthSensor>(m_ip);
-    depthSensors.emplace_back(sensor);
+    if (m_imageSensorsInfo.size() > 0) {
+        auto info = m_imageSensorsInfo.front();
+        auto sensor =
+            std::make_shared<NetworkDepthSensor>(info.first, info.second, m_ip);
+        depthSensors.emplace_back(sensor);
+
+        void *communicationHandle;
+        aditof::Status status = sensor->getHandle(&communicationHandle);
+        if (status != Status::OK) {
+            LOG(ERROR) << "Failed to obtain the handle";
+            return status;
+        }
+
+        for (size_t i = 1; i < m_imageSensorsInfo.size(); ++i) {
+            auto info = m_imageSensorsInfo.at(i);
+            auto sensor = std::make_shared<NetworkDepthSensor>(
+                info.first, info.second, communicationHandle);
+            depthSensors.emplace_back(sensor);
+        }
+    }
 
     return Status::OK;
 }
@@ -173,6 +248,13 @@ Status NetworkSensorEnumerator::getTemperatureSensors(
             nameAndId.first, nameAndId.second);
         temperatureSensors.emplace_back(tSensor);
     }
+
+    return Status::OK;
+}
+
+Status NetworkSensorEnumerator::getCameraTypeOnTarget(CameraType &cameraType) {
+
+    cameraType = m_cameraType;
 
     return Status::OK;
 }

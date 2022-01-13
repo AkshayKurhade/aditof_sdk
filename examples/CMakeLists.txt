@@ -1,15 +1,23 @@
 cmake_minimum_required(VERSION 2.8)
 project(examples)
 
+############################### Options #######################################
+option(WITH_IMGUI "Build ImGui based examples?" OFF)
+
+# Dependecies that can be accessed by any example
+if (WITH_IMGUI)
+    add_subdirectory(deps/imgui)
+endif()
+
+# Examples
 add_subdirectory(aditof-demo)
+if (WITH_IMGUI)
+    add_subdirectory(aditof-demo-imgui)
+endif()
 add_subdirectory(first-frame)
 
 if (WITH_NETWORK)
     add_subdirectory(first-frame-network)
-endif()
-
-if (JETSON)
-    add_subdirectory(imshow-jetson)
 endif()
 
 if (XAVIER)

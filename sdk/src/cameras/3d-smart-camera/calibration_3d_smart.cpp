@@ -66,8 +66,8 @@ static const uint16_t MODE_LCORR_BASE_ADDR[] = {0x6A80, 0x6AC0};
 #define ARRAY_SIZE(X) sizeof(X) / sizeof(X[0])
 
 Calibration3D_Smart::Calibration3D_Smart()
-    : m_depth_cache(nullptr), m_geometry_cache(nullptr), m_range(16000),
-      m_cal_valid(false) {
+    : m_depth_cache(nullptr), m_geometry_cache(nullptr),
+      m_distortion_cache(nullptr), m_range(16000), m_cal_valid(false) {
     m_afe_code.insert(m_afe_code.end(), &basecode[0],
                       &basecode[ARRAY_SIZE(basecode)]);
 }
@@ -79,6 +79,10 @@ Calibration3D_Smart::~Calibration3D_Smart() {
 
     if (m_geometry_cache) {
         delete[] m_geometry_cache;
+    }
+
+    if (m_distortion_cache) {
+        delete[] m_distortion_cache;
     }
 }
 
@@ -275,6 +279,7 @@ aditof::Status Calibration3D_Smart::setMode(
 
     Status status = Status::OK;
     std::vector<float> cameraMatrix;
+    std::vector<float> distortionCoeffs;
     uint16_t mode_id = (mode == "near" ? 0 : 1);
     const int16_t pixelMaxValue = (1 << 12) - 1; // 4095
     float gain = (mode == "near" ? 0.5 : 1.15);
@@ -288,11 +293,18 @@ aditof::Status Calibration3D_Smart::setMode(
         LOG(WARNING) << "Failed to read intrinsic from eeprom";
     } else {
         LOG(INFO) << "Camera intrinsic parameters:\n"
-                  << "    fx: " << cameraMatrix[2] << "\n"
-                  << "    fy: " << cameraMatrix[3] << "\n"
-                  << "    cx: " << cameraMatrix[0] << "\n"
-                  << "    cy: " << cameraMatrix[1];
+                  << "    fx: " << cameraMatrix[0] << "\n"
+                  << "    fy: " << cameraMatrix[4] << "\n"
+                  << "    cx: " << cameraMatrix[2] << "\n"
+                  << "    cy: " << cameraMatrix[5];
         buildGeometryCalibrationCache(cameraMatrix, frameWidth, frameheight);
+    }
+
+    status = getIntrinsic(DISTORTION_COEFFICIENTS, distortionCoeffs);
+    if (status != Status::OK) {
+        LOG(WARNING) << "Failed to read distortion coefficients from eeprom";
+    } else {
+        buildDistortionCorrectionCache(frameWidth, frameheight);
     }
 
     /*Execute the mode change command*/
@@ -386,10 +398,10 @@ void Calibration3D_Smart::buildGeometryCalibrationCache(
     const std::vector<float> &cameraMatrix, unsigned int width,
     unsigned int height) {
 
-    float fx = cameraMatrix[2];
-    float fy = cameraMatrix[3];
-    float x0 = cameraMatrix[0];
-    float y0 = cameraMatrix[1];
+    float fx = cameraMatrix[0];
+    float fy = cameraMatrix[4];
+    float x0 = cameraMatrix[2];
+    float y0 = cameraMatrix[5];
 
     const bool validParameters = (fx != 0 && fy != 0);
 
@@ -413,4 +425,72 @@ void Calibration3D_Smart::buildGeometryCalibrationCache(
             }
         }
     }
+}
+
+void Calibration3D_Smart::buildDistortionCorrectionCache(unsigned int width,
+                                                         unsigned int height) {
+    using namespace aditof;
+
+    double fx = (double)m_intrinsics[2];
+    double fy = (double)m_intrinsics[3];
+    double cx = (double)m_intrinsics[0];
+    double cy = (double)m_intrinsics[1];
+    std::vector<double> k{(double)m_intrinsics[4], (double)m_intrinsics[5], 0.0,
+                          0.0, m_intrinsics[6]};
+    if (m_distortion_cache) {
+        delete[] m_distortion_cache;
+    }
+
+    m_distortion_cache = new double[width * height];
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            double x = (i - cx) / fx;
+            double y = (j - cy) / fy;
+
+            //DISTORTION_COEFFICIENTS for [k1, k2, p1, p2, k3]
+            double r2 = x * x + y * y;
+            double k_calc =
+                double(1 + k[0] * r2 + k[1] * r2 * r2 + k[4] * r2 * r2 * r2);
+            m_distortion_cache[j * width + i] = k_calc;
+        }
+    }
+}
+
+aditof::Status Calibration3D_Smart::distortionCorrection(uint16_t *frame,
+                                                         unsigned int width,
+                                                         unsigned int height) {
+    using namespace aditof;
+    double fx = (double)m_intrinsics[2];
+    double fy = (double)m_intrinsics[3];
+    double cx = (double)m_intrinsics[0];
+    double cy = (double)m_intrinsics[1];
+    uint16_t *buff;
+
+    buff = new uint16_t[width * height];
+
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            //transform in dimensionless space
+            double x = (double(i) - cx) / fx;
+            double y = (double(j) - cy) / fy;
+
+            //apply correction
+            double x_dist_adim = x * m_distortion_cache[j * width + i];
+            double y_dist_adim = y * m_distortion_cache[j * width + i];
+
+            //back to original space
+            int x_dist = (int)(x_dist_adim * fx + cx);
+            int y_dist = (int)(y_dist_adim * fy + cy);
+
+            if (x_dist >= 0 && x_dist < (int)width && y_dist >= 0 &&
+                y_dist < (int)height) {
+                buff[j * width + i] = frame[y_dist * width + x_dist];
+            } else {
+                buff[j * width + i] = frame[j * width + i];
+            }
+        }
+    }
+    memcpy(frame, buff, width * height * 2);
+    delete[] buff;
+    return Status::OK;
 }

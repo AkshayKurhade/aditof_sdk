@@ -52,9 +52,13 @@ class NetworkSensorEnumerator : public aditof::SensorEnumeratorInterface {
     virtual aditof::Status getTemperatureSensors(
         std::vector<std::shared_ptr<aditof::TemperatureSensorInterface>>
             &temperatureSensors) override;
+    virtual aditof::Status
+    getCameraTypeOnTarget(aditof::CameraType &cameraType) override;
 
   private:
     std::string m_ip;
+    aditof::CameraType m_cameraType;
+    std::vector<std::pair<std::string, unsigned int>> m_imageSensorsInfo;
     std::vector<std::pair<std::string, unsigned int>> m_storagesInfo;
     std::vector<std::pair<std::string, unsigned int>> m_temperatureSensorsInfo;
 };

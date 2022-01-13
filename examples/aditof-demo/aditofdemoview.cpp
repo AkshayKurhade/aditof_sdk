@@ -67,9 +67,11 @@ uint16_t fromHexToUint(const std::string &hexValue) {
 AdiTofDemoView::AdiTofDemoView(std::shared_ptr<AdiTofDemoController> &ctrl,
                                const std::string &name)
     : m_ctrl(ctrl), m_viewName(name), m_depthFrameAvailable(false),
-      m_irFrameAvailable(false), m_stopWorkersFlag(false), m_center(true),
-      m_waitKeyBarrier(0), m_distanceVal(0), m_crtSmallSignalState(false),
-      m_crtIRGamma(false) {
+      m_irFrameAvailable(false), m_rgbCameraAvailable(false),
+      m_pointCloudImageAvailable(false), m_stopWorkersFlag(false),
+      m_center(true), m_waitKeyBarrier(0), m_distanceVal(0),
+      m_crtSmallSignalState(false), m_crtIRGamma(false),
+      m_pointCloudEnabled(false) {
     // cv::setNumThreads(2);
     m_depthImageWorker =
         std::thread(std::bind(&AdiTofDemoView::_displayDepthImage, this));
@@ -77,6 +79,10 @@ AdiTofDemoView::AdiTofDemoView(std::shared_ptr<AdiTofDemoController> &ctrl,
         std::thread(std::bind(&AdiTofDemoView::_displayIrImage, this));
     m_rgbImageWorker =
         std::thread(std::bind(&AdiTofDemoView::_displayRgbImage, this));
+#ifdef DEMO_POINT_CLOUD
+    m_pointCloudImageWorker =
+        std::thread(std::bind(&AdiTofDemoView::_displayPointCloudImage, this));
+#endif
 }
 AdiTofDemoView::~AdiTofDemoView() {
     std::unique_lock<std::mutex> lock(m_frameCapturedMutex);
@@ -86,6 +92,9 @@ AdiTofDemoView::~AdiTofDemoView() {
     m_depthImageWorker.join();
     m_irImageWorker.join();
     m_rgbImageWorker.join();
+#ifdef DEMO_POINT_CLOUD
+    m_pointCloudImageWorker.join();
+#endif
 }
 
 bool USBModeChecked = false;
@@ -165,9 +174,14 @@ void AdiTofDemoView::render() {
     bool fileNameFieldSelected = false;
 
     const cv::String windows[] = {
-        m_viewName,      "Depth Image",         "IR Image",
-        "Blended Image", "Depth/Ir Only Image", "Rgb Image"};
+        m_viewName,         "Depth Image",         "IR Image",
+        "Blended Image",    "Depth/Ir Only Image", "Rgb Image",
+        "Point Cloud Image"};
     cvui::init(windows, 1);
+
+#ifdef DEMO_POINT_CLOUD
+    cv::viz::Viz3d pointCloudWindow(windows[6]);
+#endif
 
     int frameCount = 0;
     int displayFps = 0;
@@ -181,11 +195,16 @@ void AdiTofDemoView::render() {
     int numberOfFrames = 0;
 
     std::string modes[3] = {"near", "medium", "far"};
-    std::string frameTypes[3] = {"depth_ir", "depth_only", "ir_only"};
+    std::string frameTypesDepth[3] = {"depth_ir", "depth", "ir"};
+    std::string frameTypesRgb[3] = {"depth_ir_rgb", "depth_rgb", "ir_rgb"};
+    std::string *frameTypes = frameTypesDepth;
 
     char afe_temp_str[32] = "AFE TEMP:";
     char laser_temp_str[32] = "LASER TEMP:";
     int temp_cnt = 0;
+
+    bool frameTypeCheckboxChanged = false;
+    bool connectionCheckboxChanged = true;
 
     while (true) {
 
@@ -202,7 +221,6 @@ void AdiTofDemoView::render() {
         }
 
         bool checkboxChanged = false;
-        bool frameTypeCheckboxChanged = false;
 
         // Mode checkbox group
         int btnGroupMode =
@@ -236,7 +254,8 @@ void AdiTofDemoView::render() {
             lowLevelChecked = xorValue & (1 << 2);
             mediumLevelChecked = xorValue & (1 << 1);
             highLevelChecked = xorValue & 1;
-            checkboxChanged = true;
+            //we do not use level for now
+            //checkboxChanged = true;
         }
 
         cvui::beginColumn(frame, 50, 520);
@@ -283,33 +302,7 @@ void AdiTofDemoView::render() {
             blendedViewChecked = xorValue & 1;
         }
 
-        // TODO: set camera mode here
-        if (frameTypeCheckboxChanged) {
-            int selectedFrameType =
-                (2 - static_cast<int>(std::log2(frameTypeCurrentValue)));
-            m_ctrl->setFrameType(frameTypes[selectedFrameType]);
-            status = "Frame type set: " + frameTypes[selectedFrameType];
-            frameTypeCheckboxChanged = false;
-
-            int selectedMode =
-                (2 - static_cast<int>(std::log2(modeCurrentValue)));
-            m_ctrl->setMode(modes[selectedMode]);
-            status = "Mode set: " + modes[selectedMode];
-            m_crtSmallSignalState = false;
-            checkboxChanged = false;
-        }
-
-        if (checkboxChanged) {
-            int selectedMode =
-                (2 - static_cast<int>(std::log2(modeCurrentValue)));
-            m_ctrl->setMode(modes[selectedMode]);
-            status = "Mode set: " + modes[selectedMode];
-            m_crtSmallSignalState = false;
-            checkboxChanged = false;
-        }
-
         // Connection mode checkbox group
-        bool connectionCheckboxChanged = false;
         if (USBModeChecked == true) {
             int btnGroupConnection =
                 USBModeChecked << 2 | localModeChecked << 1 | ethModeChecked;
@@ -350,6 +343,27 @@ void AdiTofDemoView::render() {
                         int selectedFrameType =
                             (2 - static_cast<int>(
                                      std::log2(frameTypeCurrentValue)));
+                        m_ctrl->getAvailableFrameTypes(availableFrameTypes);
+                        for (auto availableFrameType : availableFrameTypes) {
+                            if (availableFrameType.find("rgb") !=
+                                std::string::npos) {
+                                m_rgbCameraAvailable = true;
+                                frameTypes = frameTypesRgb;
+                                break;
+                            }
+                        }
+
+                        m_ctrl->getAvailableModes(availableModes);
+                        for (auto availableMode : availableModes) {
+                            if (availableMode.find("far") !=
+                                std::string::npos) {
+                                m_farModeEnabled = true;
+                                break;
+                            } else {
+                                m_farModeEnabled = false;
+                            }
+                        }
+
                         m_ctrl->setFrameType(frameTypes[selectedFrameType]);
 
                         int selectedMode =
@@ -366,16 +380,57 @@ void AdiTofDemoView::render() {
                     int selectedFrameType =
                         (2 -
                          static_cast<int>(std::log2(frameTypeCurrentValue)));
+                    m_ctrl->getAvailableFrameTypes(availableFrameTypes);
+                    for (auto availableFrameType : availableFrameTypes) {
+                        if (availableFrameType.find("rgb") !=
+                            std::string::npos) {
+                            m_rgbCameraAvailable = true;
+                            frameTypes = frameTypesRgb;
+                            break;
+                        }
+                    }
+
+                    m_ctrl->getAvailableModes(availableModes);
+                    for (auto availableMode : availableModes) {
+                        if (availableMode.find("far") != std::string::npos) {
+                            m_farModeEnabled = true;
+                            break;
+                        } else {
+                            m_farModeEnabled = false;
+                        }
+                    }
+
                     m_ctrl->setFrameType(frameTypes[selectedFrameType]);
 
                     int selectedMode =
                         (2 - static_cast<int>(std::log2(modeCurrentValue)));
                     m_ctrl->setMode(modes[selectedMode]);
                 }
+
+                connectionCheckboxChanged = false;
             }
 
             if (localModeChecked) {
                 bool connectionResult = m_ctrl->setRegularConnection();
+                m_ctrl->getAvailableFrameTypes(availableFrameTypes);
+                for (auto availableFrameType : availableFrameTypes) {
+                    if (availableFrameType.find("rgb") != std::string::npos) {
+                        m_rgbCameraAvailable = true;
+                        frameTypes = frameTypesRgb;
+                        break;
+                    }
+                }
+
+                m_ctrl->getAvailableModes(availableModes);
+                for (auto availableMode : availableModes) {
+                    if (availableMode.find("far") != std::string::npos) {
+                        m_farModeEnabled = true;
+                        break;
+                    } else {
+                        m_farModeEnabled = false;
+                    }
+                }
+
                 if (connectionResult == true) {
                     int selectedFrameType =
                         (2 -
@@ -386,18 +441,46 @@ void AdiTofDemoView::render() {
                         (2 - static_cast<int>(std::log2(modeCurrentValue)));
                     m_ctrl->setMode(modes[selectedMode]);
                 }
+
+                connectionCheckboxChanged = false;
             }
+        }
+
+        // TODO: set camera mode here
+        if (frameTypeCheckboxChanged) {
 
             m_ctrl->getAvailableFrameTypes(availableFrameTypes);
+            for (auto availableFrameType : availableFrameTypes) {
+                if (availableFrameType.find("rgb") != std::string::npos) {
+                    m_rgbCameraAvailable = true;
+                    frameTypes = frameTypesRgb;
+                    break;
+                }
+            }
+
+            int selectedFrameType =
+                (2 - static_cast<int>(std::log2(frameTypeCurrentValue)));
+            m_ctrl->setFrameType(frameTypes[selectedFrameType]);
+
+            status = "Frame type set: " + frameTypes[selectedFrameType];
+            frameTypeCheckboxChanged = false;
+
+            int selectedMode =
+                (2 - static_cast<int>(std::log2(modeCurrentValue)));
+            m_ctrl->setMode(modes[selectedMode]);
+            status = "Mode set: " + modes[selectedMode];
+            m_crtSmallSignalState = false;
+            checkboxChanged = false;
         }
 
-        if (find(availableFrameTypes.begin(), availableFrameTypes.end(),
-                 "rgb") != availableFrameTypes.end()) {
-            m_rgbCameraAvailable = true;
-        } else {
-            m_rgbCameraAvailable = false;
+        if (checkboxChanged) {
+            int selectedMode =
+                (2 - static_cast<int>(std::log2(modeCurrentValue)));
+            m_ctrl->setMode(modes[selectedMode]);
+            status = "Mode set: " + modes[selectedMode];
+            m_crtSmallSignalState = false;
+            checkboxChanged = false;
         }
-
         cvui::beginColumn(frame, 50, 105);
         cvui::space(10);
         cvui::text("Mode: ", 0.6);
@@ -407,27 +490,36 @@ void AdiTofDemoView::render() {
         cvui::space(10);
         cvui::checkbox("Medium", &mediumModeChecked);
         cvui::space(10);
-        cvui::checkbox("Far", &farModeChecked);
+        if (m_farModeEnabled) {
+            cvui::checkbox("Far", &farModeChecked);
+        }
         cvui::endRow();
         cvui::endColumn();
-#ifdef FXTOF1
+
         if (!USBModeChecked) {
             cvui::beginColumn(frame, 265, 105);
             cvui::space(10);
             cvui::text("Frame type: ", 0.6);
-            cvui::space(10);
-            cvui::beginRow(frame, 265, 140);
-            cvui::checkbox("depth_ir", &depthIrChecked);
-            cvui::endRow();
-            cvui::beginRow(frame, 265, 170);
-            cvui::checkbox("depth_only", &depthOnlyChecked);
-            cvui::endRow();
-            cvui::beginRow(frame, 265, 200);
-            cvui::checkbox("ir_only", &irOnlyChecked);
-            cvui::endRow();
+
+            if (!captureEnabled) {
+                cvui::space(10);
+                cvui::beginRow(frame, 265, 140);
+                cvui::checkbox(frameTypes[0], &depthIrChecked);
+                cvui::endRow();
+                cvui::beginRow(frame, 265, 170);
+                cvui::checkbox(frameTypes[1], &depthOnlyChecked);
+                cvui::endRow();
+                cvui::beginRow(frame, 265, 200);
+                cvui::checkbox(frameTypes[2], &irOnlyChecked);
+                cvui::endRow();
+            } else {
+                int selectedFrameType =
+                    (2 - static_cast<int>(std::log2(frameTypeCurrentValue)));
+                cvui::text(frame, 265, 140, frameTypes[selectedFrameType], 0.6);
+            }
             cvui::endColumn();
         }
-#endif
+
         cvui::text(frame, 50, 160, "Video: ", 0.6);
 
         if (cvui::button(
@@ -531,16 +623,6 @@ void AdiTofDemoView::render() {
             } else {
                 status = "Start live playing before recording!";
             }
-        }
-
-        if (depthIrChecked) {
-            threadNum = 2;
-        } else {
-            threadNum = 1;
-        }
-
-        if (m_rgbCameraAvailable) {
-            threadNum++;
         }
 
         cvui::rect(frame, 50, 220, 190, 30, fieldColor);
@@ -745,6 +827,12 @@ void AdiTofDemoView::render() {
         cvui::space(10);
         cvui::endColumn();
 
+#ifdef DEMO_POINT_CLOUD
+        cvui::beginColumn(frame, 160, 385);
+        cvui::checkbox("Display Point Cloud", &m_pointCloudEnabled);
+        cvui::endColumn();
+#endif
+
         cvui::rect(frame, 50, 430, 100, 30, valueColorSTh);
         cvui::text(frame, 60, 440, valueSTh);
         int thresholdClicked = cvui::iarea(50, 430, 100, 30);
@@ -849,21 +937,40 @@ void AdiTofDemoView::render() {
                 m_ctrl->stopPlayback();
                 cv::destroyWindow(windows[1]);
                 cv::destroyWindow(windows[2]);
+                if (m_rgbCameraAvailable) {
+                    cv::destroyWindow(windows[5]);
+                }
             } else if (!captureBlendedEnabled) {
                 m_capturedFrame = m_ctrl->getFrame();
+                aditof::FrameDetails fDetails;
+                m_capturedFrame->getDetails(fDetails);
+                if (fDetails.type.find("rgb") != std::string::npos) {
+                    m_rgbCameraAvailable = true;
+                }
                 std::unique_lock<std::mutex> lock(m_frameCapturedMutex);
                 if (depthOnlyChecked) {
                     m_depthFrameAvailable = true;
                     m_irFrameAvailable = false;
+                    threadNum = 1;
                 } else if (irOnlyChecked) {
                     m_irFrameAvailable = true;
                     m_depthFrameAvailable = false;
+                    threadNum = 1;
                 } else {
                     m_depthFrameAvailable = true;
                     m_irFrameAvailable = true;
+                    threadNum = 2;
                 }
                 if (m_rgbCameraAvailable) {
                     m_rgbFrameAvailable = true;
+                }
+                if (m_pointCloudEnabled) {
+                    m_pointCloudImageAvailable = true;
+                }
+                if (m_rgbCameraAvailable && m_pointCloudEnabled) {
+                    threadNum += 2;
+                } else if (m_rgbCameraAvailable || m_pointCloudEnabled) {
+                    threadNum++;
                 }
 
                 lock.unlock();
@@ -892,6 +999,14 @@ void AdiTofDemoView::render() {
                 cvui::imshow("Rgb Image", m_rgbImage);
                 m_rgbImage.release();
             }
+
+#ifdef DEMO_POINT_CLOUD
+            if (m_pointCloudEnabled) {
+                cv::viz::WCloud cloud(m_pointCloudImage, m_pointCloudColors);
+                pointCloudWindow.showWidget("Cloud", cloud);
+                pointCloudWindow.spinOnce();
+            }
+#endif
         }
 
         if (captureBlendedEnabled) {
@@ -911,6 +1026,14 @@ void AdiTofDemoView::render() {
                 cvui::imshow("Rgb Image", m_rgbImage);
                 m_rgbImage.release();
             }
+
+#ifdef DEMO_POINT_CLOUD
+            if (m_pointCloudEnabled) {
+                cv::viz::WCloud cloud(m_pointCloudImage, m_pointCloudColors);
+                pointCloudWindow.showWidget("Cloud", cloud);
+                pointCloudWindow.spinOnce();
+            }
+#endif
         }
 
         if (captureEnabled && irOnlyChecked) {
@@ -1035,7 +1158,9 @@ void AdiTofDemoView::_displayDepthImage() {
             (-(255.0 / (m_ctrl->getRangeMax() - m_ctrl->getRangeMin())) *
              m_ctrl->getRangeMin()));
         applyColorMap(m_depthImage, m_depthImage, cv::COLORMAP_RAINBOW);
-        flip(m_depthImage, m_depthImage, 1);
+        if (m_rgbCameraAvailable) {
+            flip(m_depthImage, m_depthImage, 0);
+        }
         int color;
         if (m_distanceVal > 2500)
             color = 0;
@@ -1061,6 +1186,7 @@ void AdiTofDemoView::_displayDepthImage() {
                         cv::FONT_HERSHEY_DUPLEX, 2,
                         cv::Scalar(color, color, color));
         }
+        int key = cv::waitKey(1);
         m_waitKeyBarrier += 1;
         if (m_waitKeyBarrier == threadNum) {
             imshow_lock.unlock();
@@ -1084,7 +1210,11 @@ void AdiTofDemoView::_displayIrImage() {
         std::shared_ptr<aditof::Frame> localFrame = m_capturedFrame;
         lock.unlock(); // Lock is no longer needed
         uint16_t *irData;
-        localFrame->getData(aditof::FrameDataType::IR, &irData);
+        if (ethModeChecked && irOnlyChecked) {
+            localFrame->getData(aditof::FrameDataType::FULL_DATA, &irData);
+        } else {
+            localFrame->getData(aditof::FrameDataType::IR, &irData);
+        }
 
         aditof::FrameDetails frameDetails;
         localFrame->getDetails(frameDetails);
@@ -1095,8 +1225,11 @@ void AdiTofDemoView::_displayIrImage() {
 
         m_irImage = cv::Mat(frameHeight, frameWidth, CV_16UC1, irData);
         m_irImage.convertTo(m_irImage, CV_8U, 255.0 / max_value_of_IR_pixel);
-        flip(m_irImage, m_irImage, 1);
+        if (m_rgbCameraAvailable) {
+            flip(m_irImage, m_irImage, 0);
+        }
         std::unique_lock<std::mutex> imshow_lock(m_imshowMutex);
+        int key = cv::waitKey(1);
         m_waitKeyBarrier += 1;
         if (m_waitKeyBarrier == threadNum) {
             imshow_lock.unlock();
@@ -1123,7 +1256,7 @@ void AdiTofDemoView::_displayBlendedImage() {
 
     m_irImage = cv::Mat(frameHeight, frameWidth, CV_16UC1, irData);
     m_irImage.convertTo(m_irImage, CV_8U, 255.0 / max_value_of_IR_pixel);
-    flip(m_irImage, m_irImage, 1);
+    flip(m_irImage, m_irImage, 0);
     cv::cvtColor(m_irImage, m_irImage, cv::COLOR_GRAY2RGB);
 
     m_depthImage = cv::Mat(frameHeight, frameWidth, CV_16UC1, data);
@@ -1132,7 +1265,9 @@ void AdiTofDemoView::_displayBlendedImage() {
         (255.0 / (m_ctrl->getRangeMax() - m_ctrl->getRangeMin())),
         (-(255.0 / (m_ctrl->getRangeMax() - m_ctrl->getRangeMin())) *
          m_ctrl->getRangeMin()));
-    flip(m_depthImage, m_depthImage, 1);
+    if (m_rgbCameraAvailable) {
+        flip(m_depthImage, m_depthImage, 0);
+    }
     applyColorMap(m_depthImage, m_depthImage, cv::COLORMAP_RAINBOW);
 
     cv::addWeighted(m_depthImage, m_blendValue, m_irImage, 1.0F - m_blendValue,
@@ -1140,6 +1275,7 @@ void AdiTofDemoView::_displayBlendedImage() {
 }
 
 void AdiTofDemoView::_displayRgbImage() {
+    double minAvg = 0, maxAvg = 512;
     while (!m_stopWorkersFlag) {
         std::unique_lock<std::mutex> lock(m_frameCapturedMutex);
         m_frameCapturedCv.wait(
@@ -1154,23 +1290,30 @@ void AdiTofDemoView::_displayRgbImage() {
         std::shared_ptr<aditof::Frame> localFrame = m_capturedFrame;
         lock.unlock(); // Lock is no longer needed
 
-        //To be modified when rgb is implemented
+        if (!localFrame)
+            continue;
 
-        size_t width = 640;
-        size_t height = 480;
-        uint16_t *rgbData = new uint16_t[width * height];
-        memset(rgbData, 0, width * height);
-        //localFrame->getData(aditof::FrameDataType::RGB, &rgbData);
+        uint16_t *rgbData;
+        localFrame->getData(aditof::FrameDataType::RGB, &rgbData);
 
-        //aditof::FrameDetails frameDetails;
-        //localFrame->getDetails(frameDetails);
+        aditof::FrameDetails frameDetails;
+        localFrame->getDetails(frameDetails);
 
-        //int frameHeight = static_cast<int>(frameDetails.rgbHeight);
-        //int frameWidth = static_cast<int>(frameDetails.rgbWidth);
-        int max_value_of_IR_pixel = (1 << m_ctrl->getbitCount()) - 1;
-        m_rgbImage = cv::Mat(height, width, CV_16UC1, rgbData);
-        m_rgbImage.convertTo(m_rgbImage, CV_8U, 255.0 / max_value_of_IR_pixel);
-        //flip(m_rgbImage, m_rgbImage, 1);
+        int frameHeight = static_cast<int>(frameDetails.rgbHeight);
+        int frameWidth = static_cast<int>(frameDetails.rgbWidth);
+        double minVal, maxVal;
+        cv::Scalar avg;
+        m_rgbImage = cv::Mat(frameHeight, frameWidth, CV_16UC1, rgbData);
+        cv::minMaxLoc(m_rgbImage, &minVal, &maxVal);
+        minAvg = minAvg * 0.9 + minVal * 0.1;
+        maxAvg = maxAvg * 0.9 + maxVal * 0.1;
+        m_rgbImage -= minAvg / 2;
+        m_rgbImage *= 65535 / (maxAvg - minAvg / 2);
+        avg = cv::mean(m_rgbImage);
+        m_rgbImage *= 32768.0 / avg[0];
+        cv::cvtColor(m_rgbImage, m_rgbImage, cv::COLOR_BayerBG2RGB);
+        cv::resize(m_rgbImage, m_rgbImage, cv::Size(960, 540));
+        flip(m_rgbImage, m_rgbImage, 0);
         std::unique_lock<std::mutex> imshow_lock(m_imshowMutex);
         m_waitKeyBarrier += 1;
         if (m_waitKeyBarrier == threadNum) {
@@ -1179,3 +1322,60 @@ void AdiTofDemoView::_displayRgbImage() {
         }
     }
 }
+
+#ifdef DEMO_POINT_CLOUD
+void AdiTofDemoView::_displayPointCloudImage() {
+    while (!m_stopWorkersFlag) {
+        std::unique_lock<std::mutex> lock(m_frameCapturedMutex);
+        m_frameCapturedCv.wait(lock, [&]() {
+            return m_pointCloudImageAvailable || m_stopWorkersFlag;
+        });
+
+        if (m_stopWorkersFlag) {
+            break;
+        }
+
+        m_pointCloudImageAvailable = false;
+        std::shared_ptr<aditof::Frame> localFrame = m_capturedFrame;
+        lock.unlock(); // Lock is no longer needed
+
+        uint16_t *data;
+        localFrame->getData(aditof::FrameDataType::DEPTH, &data);
+
+        aditof::FrameDetails frameDetails;
+        localFrame->getDetails(frameDetails);
+
+        int frameHeight = static_cast<int>(frameDetails.height);
+        int frameWidth = static_cast<int>(frameDetails.width);
+
+        m_pointCloudDepthColors =
+            cv::Mat(frameHeight, frameWidth, CV_16UC1, data);
+        m_pointCloudDepthColors.convertTo(
+            m_pointCloudDepthColors, CV_8U,
+            (255.0 / (m_ctrl->getRangeMax() - m_ctrl->getRangeMin())),
+            (-(255.0 / (m_ctrl->getRangeMax() - m_ctrl->getRangeMin())) *
+             m_ctrl->getRangeMin()));
+        applyColorMap(m_pointCloudDepthColors, m_pointCloudDepthColors,
+                      cv::COLORMAP_RAINBOW);
+
+        m_pointCloudColors = cv::_InputArray(m_pointCloudDepthColors);
+        std::vector<cv::Vec3f> buffer(frameWidth * frameHeight);
+        for (int i = 0; i < frameHeight; i++) {
+            for (int j = 0; j < frameWidth; j++) {
+                buffer[i * frameWidth + j] =
+                    cv::Vec3f(static_cast<float>(i), static_cast<float>(j),
+                              static_cast<float>(data[i * frameWidth + j]));
+            }
+        }
+
+        m_pointCloudImage =
+            cv::Mat(frameHeight, frameWidth, CV_32FC3, &buffer[0]).clone();
+        std::unique_lock<std::mutex> imshow_lock(m_imshowMutex);
+        m_waitKeyBarrier += 1;
+        if (m_waitKeyBarrier == threadNum) {
+            imshow_lock.unlock();
+            m_barrierCv.notify_all();
+        }
+    }
+}
+#endif

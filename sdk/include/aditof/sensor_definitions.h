@@ -47,11 +47,6 @@ namespace aditof {
  */
 struct SensorDetails {
     /**
-     * @brief The sensor's name
-     */
-    std::string sensorName;
-
-    /**
      * @brief The type of connection with the sensor
      */
     ConnectionType connectionType;

@@ -33,13 +33,15 @@
 #include "connections/target/addi9036_sensor.h"
 #include "connections/target/adt7410_sensor.h"
 #include "connections/target/eeprom.h"
+#include "connections/target/rgb_sensor.h"
+#include "connections/target/rgbd_sensor.h"
 #include "connections/target/tmp10x_sensor.h"
+#include <algorithm>
 
 using namespace aditof;
-
+using namespace std;
 Status TargetSensorEnumerator::getDepthSensors(
     std::vector<std::shared_ptr<DepthSensorInterface>> &depthSensors) {
-
     depthSensors.clear();
 
     for (const auto &sInfo : m_sensorsInfo) {
@@ -50,7 +52,37 @@ Status TargetSensorEnumerator::getDepthSensors(
             depthSensors.emplace_back(sensor);
             break;
         }
+        case SensorType::SENSOR_OV2735: {
+            auto sensor = std::make_shared<RgbSensor>(
+                sInfo.driverPath, sInfo.subDevPath, sInfo.captureDev);
+            depthSensors.emplace_back(sensor);
+            break;
         }
+        }
+    }
+
+    std::vector<std::shared_ptr<DepthSensorInterface>>::iterator
+        tmpDepthSensor = std::find_if(depthSensors.begin(), depthSensors.end(),
+                                      [](shared_ptr<DepthSensorInterface> aux) {
+                                          std::string tmpName;
+                                          aux.get()->getName(tmpName);
+                                          return (tmpName == "addi9036");
+                                      });
+    std::vector<std::shared_ptr<DepthSensorInterface>>::iterator tmpRgbSensor =
+        std::find_if(depthSensors.begin(), depthSensors.end(),
+                     [](shared_ptr<DepthSensorInterface> aux) {
+                         std::string tmpName;
+                         aux.get()->getName(tmpName);
+                         return (tmpName == "ov2735");
+                     });
+
+    if (tmpDepthSensor != depthSensors.end() &&
+        tmpRgbSensor != depthSensors.end()) {
+        auto sensor =
+            std::make_shared<RgbdSensor>(*tmpDepthSensor, *tmpRgbSensor);
+        depthSensors.erase(tmpDepthSensor);
+        depthSensors.erase(tmpRgbSensor);
+        depthSensors.emplace_back(sensor);
     }
 
     return Status::OK;
@@ -92,6 +124,18 @@ Status TargetSensorEnumerator::getTemperatureSensors(
         }
         }
     }
+
+    return Status::OK;
+}
+
+Status TargetSensorEnumerator::getCameraTypeOnTarget(CameraType &cameraType) {
+#if defined(FXTOF1)
+    cameraType = CameraType::AD_FXTOF1_EBZ;
+#elif defined(SMART_3D)
+    cameraType = CameraType::SMART_3D_CAMERA;
+#else
+    cameraType = CameraType::AD_96TOF1_EBZ;
+#endif
 
     return Status::OK;
 }

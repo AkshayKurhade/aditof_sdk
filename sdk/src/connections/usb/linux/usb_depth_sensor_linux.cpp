@@ -130,13 +130,24 @@ aditof::Status UsbDepthSensor::open() {
     }
 
     m_implData->opened = true;
-
+    m_implData->started = true;
     return status;
 }
 
 aditof::Status UsbDepthSensor::start() {
     using namespace aditof;
 
+    if (m_implData->started) {
+        return Status::OK;
+    }
+    LOG(INFO) << "Starting device";
+    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (-1 == UsbLinuxUtils::xioctl(m_implData->fd, VIDIOC_STREAMON, &type)) {
+        LOG(WARNING) << "VIDIOC_STREAMON, error:" << errno << "("
+                     << strerror(errno) << ")";
+        return Status::GENERIC_ERROR;
+    }
+    m_implData->started = true;
     return Status::OK;
 }
 
@@ -180,14 +191,14 @@ aditof::Status UsbDepthSensor::getAvailableFrameTypes(
     details.height = aditof::USB_FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height; //TODO
-    details.type = "depth_only";
+    details.type = "depth";
     types.push_back(details);
 
     details.width = aditof::USB_FRAME_WIDTH;
     details.height = aditof::USB_FRAME_HEIGHT;
     details.fullDataWidth = details.width;
     details.fullDataHeight = details.height; //TODO
-    details.type = "ir_only";
+    details.type = "ir";
     types.push_back(details);
 
     // TO DO: Should get these details from the hardware/firmware
@@ -576,4 +587,10 @@ aditof::Status UsbDepthSensor::getHandle(void **handle) {
         LOG(ERROR) << "Won't return the handle. Device hasn't been opened yet.";
         return aditof::Status::UNAVAILABLE;
     }
+}
+
+aditof::Status UsbDepthSensor::getName(std::string &sensorName) const {
+    sensorName = m_sensorName;
+
+    return aditof::Status::OK;
 }

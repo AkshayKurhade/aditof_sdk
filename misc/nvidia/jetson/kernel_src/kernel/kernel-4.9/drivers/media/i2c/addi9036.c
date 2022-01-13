@@ -50,7 +50,7 @@ struct addi9036 {
 static bool addi9306_readable_register(struct device *dev, unsigned int reg)
 {
 	if (((reg >= 0x4000) && (reg <= 0x6FFF)) ||
-	    ((reg >= 0x7C00) && (reg <= 0x7C1F)) ||
+	    ((reg >= 0x7C00) && (reg <= 0x7C9F)) ||
 	    ((reg >= 0x7CE0) && (reg <= 0x7FFF)) ||
 	    ((reg >= 0xC000) && (reg <= 0xC0FF)) ||
 	    ((reg >= 0xC110) && (reg <= 0xC200)) ||
@@ -115,7 +115,7 @@ static int addi9036_set_chip_config(struct v4l2_ctrl *ctrl)
 	for (index = 0; index < ctrl->elems; index += 2) {
 		ret = regmap_write(priv->regmap, *reg, *val);
 		if (ret)
-			dev_warn(dev,
+			dev_dbg(dev,
 				 "could not write to register %x\n", *reg);
 
 		reg += 2;

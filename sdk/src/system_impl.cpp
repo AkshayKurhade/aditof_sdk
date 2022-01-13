@@ -32,19 +32,30 @@
 #include "system_impl.h"
 #include "aditof/sensor_enumerator_factory.h"
 #include "aditof/sensor_enumerator_interface.h"
-#if defined(CHICONY_006)
-#include "camera_chicony_006.h"
-#elif defined(FXTOF1)
-#include "camera_fxtof1.h"
-#elif defined(SMART_3D)
-#include "camera_3d_smart.h"
+
+#ifndef TARGET
+#include "cameras/3d-smart-camera/camera_3d_smart.h"
+#include "cameras/ad-96tof1-ebz/camera_96tof1.h"
+#include "cameras/ad-fxtof1-ebz/camera_fxtof1.h"
 #else
-#include "camera_96tof1.h"
+#if defined(FXTOF1)
+#include "cameras/ad-fxtof1-ebz/camera_fxtof1.h"
+#elif defined(SMART_3D)
+#include "cameras/3d-smart-camera/camera_3d_smart.h"
+#else
+#include "cameras/ad-96tof1-ebz/camera_96tof1.h"
 #endif
+#endif // #ifndef TARGET
 
 #include <aditof/camera.h>
 #include <algorithm>
 #include <glog/logging.h>
+
+#include "aditof/version.h"
+
+#ifdef HAS_NETWORK
+#include <lws_config.h>
+#endif
 
 using namespace aditof;
 
@@ -55,35 +66,63 @@ buildCamera(std::unique_ptr<SensorEnumeratorInterface> enumerator) {
     std::vector<std::shared_ptr<DepthSensorInterface>> depthSensors;
     std::vector<std::shared_ptr<StorageInterface>> storages;
     std::vector<std::shared_ptr<TemperatureSensorInterface>> temperatureSensors;
+    std::shared_ptr<Camera> camera;
+    CameraType cameraType;
 
     enumerator->getDepthSensors(depthSensors);
+    if (depthSensors.size() < 1) {
+        LOG(ERROR) << "No imagers found";
+        return nullptr;
+    }
+
     enumerator->getStorages(storages);
     enumerator->getTemperatureSensors(temperatureSensors);
+    enumerator->getCameraTypeOnTarget(cameraType);
 
-    std::shared_ptr<Camera> camera;
-    if (depthSensors.size() > 0) {
-#if defined(CHICONY_006)
-        camera = std::make_shared<CameraChicony>(depthSensors[0], storages,
-                                                 temperatureSensors);
-#elif defined(FXTOF1)
-        camera = std::make_shared<CameraFxTof1>(depthSensors[0], storages,
-                                                temperatureSensors);
-#elif defined(SMART_3D)
-        if (depthSensors.size() != 2)
-            return nullptr;
-        // TO DO: find a way to differentiate the DEPTH and RBG sensors
-        camera = std::make_shared<Camera3D_Smart>(
-            depthSensors[0], depthSensors[1], storages, temperatureSensors);
-#else
+#ifndef TARGET
+    switch (cameraType) {
+    case CameraType::AD_96TOF1_EBZ:
         camera = std::make_shared<Camera96Tof1>(depthSensors[0], storages,
                                                 temperatureSensors);
-#endif
+        break;
+    case CameraType::AD_FXTOF1_EBZ:
+        camera = std::make_shared<CameraFxTof1>(depthSensors[0], storages,
+                                                temperatureSensors);
+        break;
+    case CameraType::SMART_3D_CAMERA:
+        camera = std::make_shared<Camera3D_Smart>(depthSensors[0], storages,
+                                                  temperatureSensors);
+        break;
     }
+#else
+#if defined(FXTOF1)
+    camera = std::make_shared<CameraFxTof1>(depthSensors[0], storages,
+                                            temperatureSensors);
+#elif defined(SMART_3D)
+    camera = std::make_shared<Camera3D_Smart>(depthSensors[0], storages,
+                                              temperatureSensors);
+#else
+    camera = std::make_shared<Camera96Tof1>(depthSensors[0], storages,
+                                            temperatureSensors);
+#endif
+#endif // #ifndef TARGET
 
     return camera;
 }
 
-SystemImpl::SystemImpl() {}
+SystemImpl::SystemImpl() {
+    static bool sdkRevisionLogged = false;
+    if (!sdkRevisionLogged) {
+        LOG(INFO) << "SDK version: " << aditof::getApiVersion()
+                  << " | branch: " << ADITOFSDK_GIT_BRANCH
+                  << " | commit: " << ADITOFSDK_GIT_COMMIT;
+        sdkRevisionLogged = true;
+#if HAS_NETWORK
+        LOG(INFO) << "SDK built with websockets version:"
+                  << LWS_LIBRARY_VERSION;
+#endif
+    }
+}
 
 SystemImpl::~SystemImpl() = default;
 
@@ -107,7 +146,9 @@ Status SystemImpl::getCameraList(
     Status status = sensorEnumerator->searchSensors();
     if (status == Status::OK) {
         auto camera = buildCamera(std::move(sensorEnumerator));
-        cameraList.emplace_back(camera);
+        if (camera) {
+            cameraList.emplace_back(camera);
+        }
     }
 
     return Status::OK;
@@ -130,7 +171,9 @@ SystemImpl::getCameraListAtIp(std::vector<std::shared_ptr<Camera>> &cameraList,
     Status status = sensorEnumerator->searchSensors();
     if (status == Status::OK) {
         auto camera = buildCamera(std::move(sensorEnumerator));
-        cameraList.emplace_back(camera);
+        if (camera) {
+            cameraList.emplace_back(camera);
+        }
     }
 
     return Status::OK;

@@ -43,19 +43,10 @@
 
 #define INTRINSIC 5
 #define DISTORTION_COEFFICIENTS 6
-
-//! mode_struct - Structure to hold the packet consisting of map of parameters
-/*!
-    mode_struct provides structure to hold the packet(sub map) of parameters
-*/
-struct mode_struct {
-    uint16_t pulse_cnt;
-    uint8_t depth_pwr[48];
-    uint16_t depth_x0;
-    uint16_t depth_offset[49];
-    uint16_t depth3;
-    uint16_t depth2;
-};
+#ifndef EEPROM_SERIAL_ADDR
+#define EEPROM_SERIAL_ADDR 0x00010014
+#define EEPROM_SERIAL_LENGHT 12
+#endif
 
 namespace aditof {
 class StorageInterface;
@@ -78,18 +69,40 @@ class CalibrationFxTof1 {
     aditof::Status calibrateCameraGeometry(uint16_t *frame,
                                            uint32_t frame_size);
 
+    aditof::Status distortionCorrection(uint16_t *frame, unsigned int width,
+                                        unsigned int height);
+
   private:
     void buildDepthCalibrationCache(float gain, float offset,
                                     int16_t maxPixelValue, int range);
     void buildGeometryCalibrationCache(const std::vector<float> &cameraMatrix,
                                        unsigned int width, unsigned int height);
+    void
+    buildDistortionCorrectionCache(const std::vector<float> &cameraMatrix,
+                                   const std::vector<float> &distortionCoeffs,
+                                   unsigned int width, unsigned int height);
+
+  private:
+    //! mode_struct - Structure to hold the packet consisting of map of parameters
+    /*!
+    mode_struct provides structure to hold the packet(sub map) of parameters
+*/
+    struct mode_struct {
+        uint16_t pulse_cnt;
+        uint8_t depth_pwr[48];
+        uint16_t depth_x0;
+        uint16_t depth_offset[49];
+        uint16_t depth3;
+        uint16_t depth2;
+    };
 
   private:
     uint16_t *m_depth_cache;
     double *m_geometry_cache;
+    double *m_distortion_cache;
     int m_range;
     mode_struct m_mode_settings[2];
-    std::vector<float> m_intrinsics;
+    std::vector<double> m_intrinsics;
     std::vector<uint16_t> m_afe_code;
     bool m_cal_valid;
 };
